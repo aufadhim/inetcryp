@@ -83,7 +83,7 @@ app.mount("/reports", StaticFiles(directory="data/reports", html=True), name="re
 async def serve_index():
     index_path = os.path.join("static", "index.html")
     if os.path.exists(index_path):
-        return FileResponse(index_path)
+        return FileResponse(index_path, headers={"Cache-Control": "no-store"})
     return JSONResponse({"status": "running", "message": "INETCRYP Terminal Backend Active"})
 
 

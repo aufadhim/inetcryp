@@ -519,20 +519,60 @@
   </footer>
 
   <script>
-    // Optional API password: kept only in browser session storage.
+    // API password stays in this browser session only. All parallel requests
+    // share one prompt so dashboard startup cannot create a prompt storm.
     const nativeFetch = window.fetch.bind(window);
+    let authPromptPromise = null;
+    let authMessageTimer = null;
+
+    function showAuthMessage(message, ok = false) {
+      let box = document.getElementById("inetcrypAuthMessage");
+      if (!box) {
+        box = document.createElement("div");
+        box.id = "inetcrypAuthMessage";
+        box.className = "fixed top-4 right-4 z-[9999] max-w-sm rounded-xl border px-4 py-3 text-sm font-semibold shadow-2xl";
+        document.body.appendChild(box);
+      }
+      box.className = `fixed top-4 right-4 z-[9999] max-w-sm rounded-xl border px-4 py-3 text-sm font-semibold shadow-2xl ${ok ? "bg-emerald-950 border-emerald-700 text-emerald-200" : "bg-rose-950 border-rose-700 text-rose-200"}`;
+      box.textContent = message;
+      box.hidden = false;
+      clearTimeout(authMessageTimer);
+      authMessageTimer = setTimeout(() => { box.hidden = true; }, 5000);
+    }
+
+    function requestAccessPassword() {
+      if (!authPromptPromise) {
+        authPromptPromise = Promise.resolve().then(() => {
+          const value = window.prompt("Masukkan ACCESS_PASSWORD INETCRYP:") || "";
+          if (value) sessionStorage.setItem("inetcryp_access_password", value);
+          return value;
+        }).finally(() => {
+          authPromptPromise = null;
+        });
+      }
+      return authPromptPromise;
+    }
+
     window.fetch = async (input, init = {}) => {
+      const target = typeof input === "string" ? input : (input && input.url) || "";
+      if (!target.startsWith("/api/")) return nativeFetch(input, init);
       const headers = new Headers(init.headers || {});
       let password = sessionStorage.getItem("inetcryp_access_password") || "";
       if (password) headers.set("X-Access-Password", password);
       let response = await nativeFetch(input, { ...init, headers });
+      if (response.status !== 401) return response;
+
+      sessionStorage.removeItem("inetcryp_access_password");
+      password = await requestAccessPassword();
+      if (!password) return response;
+
+      headers.set("X-Access-Password", password);
+      response = await nativeFetch(input, { ...init, headers });
       if (response.status === 401) {
-        password = window.prompt("Masukkan ACCESS_PASSWORD INETCRYP:") || "";
-        if (password) {
-          sessionStorage.setItem("inetcryp_access_password", password);
-          headers.set("X-Access-Password", password);
-          response = await nativeFetch(input, { ...init, headers });
-        }
+        sessionStorage.removeItem("inetcryp_access_password");
+        showAuthMessage("Password dashboard salah. Muat ulang halaman untuk mencoba lagi.");
+      } else {
+        showAuthMessage("Dashboard berhasil terautentikasi.", true);
       }
       return response;
     };
