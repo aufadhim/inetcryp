@@ -344,6 +344,16 @@ class CryptoPaperTrader:
         win_rate = round((len(wins) / closed_trades * 100), 1) if closed_trades > 0 else 0.0
 
         total_realized_pnl = sum(float(t.get("pnl_usd", 0)) for t in history)
+        gross_profit = sum(float(t.get("pnl_usd", 0)) for t in history if float(t.get("pnl_usd", 0)) > 0)
+        gross_loss = abs(sum(float(t.get("pnl_usd", 0)) for t in history if float(t.get("pnl_usd", 0)) <= 0))
+        profit_factor = gross_profit / gross_loss if gross_loss else (999.0 if gross_profit else 0.0)
+        running_equity = peak_equity = float(init)
+        max_drawdown_pct = 0.0
+        for trade in history:
+            running_equity += float(trade.get("pnl_usd", 0))
+            peak_equity = max(peak_equity, running_equity)
+            if peak_equity > 0:
+                max_drawdown_pct = max(max_drawdown_pct, (peak_equity - running_equity) / peak_equity * 100)
         marked_positions = []
         total_open_value = 0.0
         total_unrealized_pnl = 0.0
@@ -380,6 +390,10 @@ class CryptoPaperTrader:
             "open_positions": {symbol: pos for symbol, pos in zip(open_pos.keys(), marked_positions)},
             "closed_trades_count": closed_trades,
             "win_rate_pct": win_rate,
+            "winning_trades_count": len(wins),
+            "losing_trades_count": len(losses),
+            "profit_factor": round(profit_factor, 2),
+            "max_drawdown_pct": round(max_drawdown_pct, 2),
             "history": history[-20:],
             "last_scan_time": self.state.get("last_scan_time", "-")
         }

@@ -29,10 +29,10 @@ function Start-Tunnel {
     $out = Join-Path $LogRoot 'cloudflared.out.log'
     $err = Join-Path $LogRoot 'cloudflared.err.log'
     Remove-Item -LiteralPath $out,$err -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath (Join-Path $AppRoot 'data\public_report_url.txt') -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $AppRoot 'data\public_report_url.txt'),(Join-Path $AppRoot 'data\public_dashboard_url.txt') -Force -ErrorAction SilentlyContinue
     $env:REPORT_PUBLIC_URL = $null
     # The office network permits HTTP/2 but blocks/degrades outbound QUIC.
-    return Start-Process -FilePath $Cloudflared -ArgumentList @('tunnel','--no-autoupdate','--protocol','http2','--url','http://127.0.0.1:8091') -WorkingDirectory $AppRoot -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+    return Start-Process -FilePath $Cloudflared -ArgumentList @('tunnel','--no-autoupdate','--protocol','http2','--url','http://127.0.0.1:8090') -WorkingDirectory $AppRoot -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
 }
 
 function Wait-TunnelUrl([System.Diagnostics.Process]$TunnelProcess) {
@@ -78,8 +78,9 @@ try {
                 $children['tunnel'] = Start-Tunnel
                 $tunnelBaseUrl = Wait-TunnelUrl $children['tunnel']
                 if ($tunnelBaseUrl) {
-                    $env:REPORT_PUBLIC_URL = "$tunnelBaseUrl/latest.html"
+                    $env:REPORT_PUBLIC_URL = "$tunnelBaseUrl/reports/latest.html"
                     [IO.File]::WriteAllText((Join-Path $AppRoot 'data\public_report_url.txt'), $env:REPORT_PUBLIC_URL)
+                    [IO.File]::WriteAllText((Join-Path $AppRoot 'data\public_dashboard_url.txt'), "$tunnelBaseUrl/")
                 } else {
                     Write-SupervisorStatus 'degraded' 'Tunnel aktif tetapi URL baru belum tersedia; link lama tidak digunakan.'
                 }
