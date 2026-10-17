@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>INETCRYP — 24/7 Crypto Whale Terminal & BandarMetrics</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              500: '#10b981',
+              600: '#059669',
+              dark: '#0b0f19',
+              card: '#111827',
+              border: '#1f2937',
+              accent: '#8b5cf6',
+              cyan: '#06b6d4'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="/static/js/lightweight-charts.js"></script>
+  <style>
+    body { background-color: #0b0f19; color: #e5e7eb; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .glass-card { background: rgba(17, 24, 39, 0.85); backdrop-filter: blur(12px); border: 1px solid #1f2937; }
+    .neon-purple { color: #c084fc; text-shadow: 0 0 10px rgba(192, 132, 252, 0.4); }
+    .neon-green { color: #34d399; text-shadow: 0 0 10px rgba(52, 211, 153, 0.4); }
+    .neon-cyan { color: #38bdf8; text-shadow: 0 0 10px rgba(56, 189, 248, 0.4); }
+    .neon-red { color: #f87171; text-shadow: 0 0 10px rgba(248, 113, 113, 0.4); }
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0b0f19; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Top Navbar -->
+  <header class="border-b border-gray-800 bg-[#0d1322] px-4 py-3 sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-white font-bold text-xl">
+          🐋
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-wide text-white flex items-center gap-2">
+            INETCRYP <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono">24/7 WHALE RADAR</span>
+          </h1>
+          <p class="text-xs text-gray-400">Crypto Bandarmologi, Volume Delta & Smart Money Terminal</p>
+        </div>
+      </div>
+
+      <!-- Quick Pair Selector & Timeframes -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <div class="relative">
+          <input id="symbolInput" type="text" value="BTCUSDT" class="bg-gray-900 border border-gray-700 text-sm font-semibold rounded-lg px-3 py-1.5 text-white w-28 uppercase focus:border-cyan-500 focus:outline-none" />
+          <button onclick="changeSymbol(document.getElementById('symbolInput').value)" class="absolute right-1 top-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs px-2 py-1 rounded">
+            GO
+          </button>
+        </div>
+
+        <!-- Quick Ticker Badges -->
+        <div class="hidden md:flex gap-1">
+          <button onclick="changeSymbol('BTCUSDT')" class="px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">BTC</button>
+          <button onclick="changeSymbol('ETHUSDT')" class="px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">ETH</button>
+          <button onclick="changeSymbol('SOLUSDT')" class="px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">SOL</button>
+          <button onclick="changeSymbol('BNBUSDT')" class="px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">BNB</button>
+          <button onclick="changeSymbol('DOGEUSDT')" class="px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">DOGE</button>
+          <button onclick="changeSymbol('PEPEUSDT')" class="px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">PEPE</button>
+          <button onclick="changeSymbol('SUIUSDT')" class="px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">SUI</button>
+        </div>
+
+        <div class="h-5 w-[1px] bg-gray-700 mx-1 hidden sm:block"></div>
+
+        <!-- Timeframe Buttons -->
+        <div class="flex bg-gray-900 p-0.5 rounded-lg border border-gray-800" id="tfSelector">
+          <button onclick="changeTimeframe('5m')" class="px-2.5 py-1 text-xs font-medium rounded text-gray-400 hover:text-white" data-tf="5m">5m</button>
+          <button onclick="changeTimeframe('15m')" class="px-2.5 py-1 text-xs font-medium rounded text-gray-400 hover:text-white" data-tf="15m">15m</button>
+          <button onclick="changeTimeframe('1h')" class="px-2.5 py-1 text-xs font-medium rounded bg-cyan-600 text-white" data-tf="1h">1h</button>
+          <button onclick="changeTimeframe('4h')" class="px-2.5 py-1 text-xs font-medium rounded text-gray-400 hover:text-white" data-tf="4h">4h</button>
+          <button onclick="changeTimeframe('1d')" class="px-2.5 py-1 text-xs font-medium rounded text-gray-400 hover:text-white" data-tf="1d">1D</button>
+        </div>
+
+        <!-- Binance Status -->
+        <span id="accountStatusBadge" class="hidden sm:inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-800/80">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          Binance 24/7 Live
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="border-b border-gray-800 bg-[#0f172a] px-4">
+    <div class="max-w-7xl mx-auto flex space-x-6 text-sm font-medium">
+      <button onclick="switchTab('terminal')" id="tabBtn-terminal" class="py-3 border-b-2 border-cyan-500 text-cyan-400 flex items-center gap-2">
+        <i class="fa-solid fa-chart-line"></i> Terminal Radar
+      </button>
+      <button onclick="switchTab('screener')" id="tabBtn-screener" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2">
+        <i class="fa-solid fa-radar"></i> Screener Paus 24/7
+      </button>
+      <button onclick="switchTab('backtester')" id="tabBtn-backtester" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2">
+        <i class="fa-solid fa-vial"></i> Simulator Backtest
+      </button>
+      <button onclick="switchTab('paper')" id="tabBtn-paper" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2">
+        <i class="fa-solid fa-robot"></i> Forward Tester (Paper Trade 24/7)
+      </button>
+      <button onclick="switchTab('settings')" id="tabBtn-settings" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2">
+        <i class="fa-solid fa-gear"></i> Bot & Telegram
+      </button>
+    </div>
+  </nav>
+
+  <!-- Main Content Area -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 space-y-4">
+
+    <!-- ==================== TAB 1: TERMINAL RADAR ==================== -->
+    <div id="tab-terminal" class="space-y-4">
+
+      <!-- Metrics Top Bar -->
+      <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
+        <!-- Card 1: Harga & 24h Change -->
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Harga Terakhir</div>
+          <div id="statPrice" class="text-lg font-bold text-white mt-1">$0.00</div>
+          <div id="statChange" class="text-xs font-semibold text-emerald-400">+0.00%</div>
+        </div>
+
+        <!-- Card 2: 4-Phase Wyckoff -->
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Fase Wyckoff</div>
+          <div id="statPhase" class="text-base font-bold text-yellow-400 mt-1">AKUMULASI</div>
+          <div id="statSignal" class="text-[11px] text-gray-400 truncate">Mendeteksi...</div>
+        </div>
+
+        <!-- Card 3: LPM Score -->
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400 flex justify-between">
+            <span>LPM Score</span>
+            <span class="text-[10px] text-gray-500">Power Index</span>
+          </div>
+          <div id="statLpm" class="text-lg font-bold text-cyan-400 mt-1">50.0 <span class="text-xs text-gray-400">/ 100</span></div>
+          <div id="statSlipstream" class="text-xs text-gray-400">Slipstream: Netral</div>
+        </div>
+
+        <!-- Card 4: Modal Paus (Bandar Cost) -->
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Modal Paus (VWAP)</div>
+          <div id="statBandarCost" class="text-base font-bold text-purple-400 mt-1">$0.00</div>
+          <div id="statDistBandar" class="text-xs font-semibold text-gray-300">0.00% (Fair)</div>
+        </div>
+
+        <!-- Card 5: Volume Intensity -->
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Volume Intensity</div>
+          <div id="statIntensity" class="text-lg font-bold text-white mt-1">1.0x</div>
+          <div id="statSpike" class="text-xs text-gray-400">Normal Flow</div>
+        </div>
+
+        <!-- Card 6: Orderbook Pressure -->
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Orderbook Pressure</div>
+          <div id="statBidRatio" class="text-lg font-bold text-emerald-400 mt-1">1.0x Ratio</div>
+          <div id="statBidPct" class="text-xs text-gray-400">50% Bids vs 50% Asks</div>
+        </div>
+
+        <!-- Card 7: Cross-Exchange Signal -->
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Cross-Exchange Signal</div>
+          <div id="statCrossSignal" class="text-base font-bold text-cyan-400 mt-1">Loading...</div>
+          <div id="statCrossMeta" class="text-xs text-gray-400">Coverage: -</div>
+        </div>
+      </div>
+
+      <!-- Main Chart & Whale Order Flow Grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+
+        <!-- Chart Area (3 cols) -->
+        <div class="lg:col-span-3 glass-card rounded-xl p-4 flex flex-col space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span id="chartTitle" class="text-base font-bold text-white">BTCUSDT (1h)</span>
+              <span class="text-xs px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
+                🟣 Purple = Anomaly Volume Spike (&gt;2.0x)
+              </span>
+              <span class="text-xs px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+                🔵 Blue = Modal Paus (VWAP)
+              </span>
+            </div>
+            <button onclick="askGeminiAI()" class="text-xs px-3 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium flex items-center gap-1.5 transition">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Analisis AI Paus
+            </button>
+          </div>
+
+          <!-- Candlestick Chart Container -->
+          <div id="candleChartContainer" class="w-full h-[380px] rounded-lg overflow-hidden bg-[#090d16]"></div>
+
+          <!-- Subchart LPM Container -->
+          <div class="pt-2 border-t border-gray-800">
+            <div class="flex items-center justify-between text-xs text-gray-400 mb-1">
+              <span>LPM Subchart (Likely Participant Movement) & Slipstream Trigger Line</span>
+              <span>Zona Akumulasi: &gt;55 | Distribusi: &lt;45</span>
+            </div>
+            <div id="lpmChartContainer" class="w-full h-[140px] rounded-lg overflow-hidden bg-[#090d16]"></div>
+          </div>
+        </div>
+
+        <!-- Whale Order Flow & Large Trades (1 col) -->
+        <div class="glass-card rounded-xl p-4 flex flex-col space-y-4">
+          <div class="flex items-center justify-between border-b border-gray-800 pb-2">
+            <h3 class="text-sm font-bold text-white flex items-center gap-1.5">
+              <i class="fa-solid fa-water text-cyan-400"></i> Whale Tape (&gt;$10k)
+            </h3>
+            <span class="text-[10px] text-gray-400">Live Trades</span>
+          </div>
+
+          <!-- Large Trades Tape List -->
+          <div id="whaleTapeList" class="flex-1 overflow-y-auto max-h-[300px] space-y-1.5 text-xs font-mono">
+            <div class="text-gray-500 text-center py-4">Memuat transaksi paus...</div>
+          </div>
+
+          <!-- Orderbook Walls Detection -->
+          <div class="border-t border-gray-800 pt-3">
+            <h4 class="text-xs font-bold text-gray-300 mb-2 flex items-center gap-1">
+              <i class="fa-solid fa-shield text-purple-400"></i> Dinding Tembok Orderbook
+            </h4>
+            <div id="whaleWallsList" class="space-y-1 text-xs">
+              <div class="text-gray-500 text-center py-2">Mendeteksi tembok...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Analysis Modal / Drawer Container -->
+      <div id="aiAnalysisCard" class="hidden glass-card rounded-xl p-4 border border-indigo-500/30 bg-[#0e1424]">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-2 mb-3">
+          <div class="flex items-center gap-2">
+            <div class="w-6 h-6 rounded bg-indigo-600 flex items-center justify-center text-xs text-white">✨</div>
+            <h3 class="text-sm font-bold text-white">Gemini AI — Quantitative Whale Intelligence</h3>
+          </div>
+          <button onclick="document.getElementById('aiAnalysisCard').classList.add('hidden')" class="text-gray-400 hover:text-white">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <div id="aiAnalysisContent" class="text-xs leading-relaxed text-gray-300 whitespace-pre-line font-sans">
+          Sedang berpikir...
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 2: SCREENER PAUS 24/7 ==================== -->
+    <div id="tab-screener" class="hidden space-y-4">
+      <div class="glass-card rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-xs text-gray-400 font-semibold uppercase">Preset Filter:</span>
+          <button onclick="setScreenerPreset('all')" class="screener-filter-btn px-3 py-1.5 text-xs rounded-lg bg-cyan-600 text-white font-medium" data-preset="all">
+            Semua Koin
+          </button>
+          <button onclick="setScreenerPreset('silent_acc')" class="screener-filter-btn px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium" data-preset="silent_acc">
+            🐋 Nyerok Murah (Silent Acc)
+          </button>
+          <button onclick="setScreenerPreset('markup_breakout')" class="screener-filter-btn px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium" data-preset="markup_breakout">
+            🚀 Mark-Up Breakout
+          </button>
+          <button onclick="setScreenerPreset('whale_dominant')" class="screener-filter-btn px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium" data-preset="whale_dominant">
+            👑 Dominasi Paus (LPM &gt; 58)
+          </button>
+          <button onclick="setScreenerPreset('near_cost')" class="screener-filter-btn px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium" data-preset="near_cost">
+            🎯 Dekat Modal Bandar (&plusmn;3%)
+          </button>
+          <button onclick="setScreenerPreset('distribution_warning')" class="screener-filter-btn px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium" data-preset="distribution_warning">
+            ⚠️ Bahaya Cuci Piring
+          </button>
+        </div>
+
+        <button onclick="loadScreener()" class="px-3.5 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-white flex items-center gap-2 border border-gray-700">
+          <i class="fa-solid fa-arrows-rotate"></i> Scan Ulang
+        </button>
+      </div>
+
+      <!-- Screener Table -->
+      <div class="glass-card rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-gray-900/80 text-gray-400 uppercase text-[11px] border-b border-gray-800">
+              <tr>
+                <th class="p-3">Pair / Koin</th>
+                <th class="p-3">Harga</th>
+                <th class="p-3">24h Chg</th>
+                <th class="p-3">Volume 24h</th>
+                <th class="p-3">LPM Score</th>
+                <th class="p-3">Fase Wyckoff</th>
+                <th class="p-3">Modal Paus</th>
+                <th class="p-3">Jarak ke Paus</th>
+                <th class="p-3">Intensity</th>
+                <th class="p-3 text-right">Sinyal / Action</th>
+              </tr>
+            </thead>
+            <tbody id="screenerTableBody" class="divide-y divide-gray-800/60 font-mono">
+              <tr>
+                <td colspan="10" class="text-center py-8 text-gray-500 font-sans">Sedang memindai pasar crypto Binance...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 3: BACKTEST SIMULATOR ==================== -->
+    <div id="tab-backtester" class="hidden space-y-4">
+      <div class="glass-card rounded-xl p-4">
+        <div class="grid grid-cols-2 md:grid-cols-6 gap-3 items-end">
+          <div>
+            <label class="text-[11px] text-gray-400 block mb-1">Simulasi Pair</label>
+            <input id="btSymbol" type="text" value="BTCUSDT" class="w-full bg-gray-900 border border-gray-700 text-xs rounded-lg px-2.5 py-1.5 text-white uppercase focus:outline-none" />
+          </div>
+          <div>
+            <label class="text-[11px] text-gray-400 block mb-1">Timeframe</label>
+            <select id="btTimeframe" class="w-full bg-gray-900 border border-gray-700 text-xs rounded-lg px-2 py-1.5 text-white focus:outline-none">
+              <option value="15m" selected>15m</option>
+              <option value="1h">1h</option>
+              <option value="4h">4h</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-[11px] text-gray-400 block mb-1">Strategi penelitian</label>
+            <select id="btStrategy" class="w-full bg-gray-900 border border-gray-700 text-xs rounded-lg px-2 py-1.5 text-white focus:outline-none">
+              <option value="ema_pullback_v1" selected>EMA Pullback — paper replay (research)</option>
+              <option value="whale_slipstream">LPM Slipstream Crossover</option>
+              <option value="bullish_divergence">Bullish Divergence (Silent Acc)</option>
+              <option value="markup_breakout">Mark-Up Intensity Breakout</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-[11px] text-gray-400 block mb-1">Take Profit (%)</label>
+            <input id="btTp" type="number" step="0.5" value="3.0" class="w-full bg-gray-900 border border-gray-700 text-xs rounded-lg px-2 py-1.5 text-white focus:outline-none" />
+          </div>
+          <div>
+            <label class="text-[11px] text-gray-400 block mb-1">Stop Loss (%)</label>
+            <input id="btSl" type="number" step="0.5" value="1.5" class="w-full bg-gray-900 border border-gray-700 text-xs rounded-lg px-2 py-1.5 text-white focus:outline-none" />
+          </div>
+          <div>
+            <button onclick="runBacktest()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-xs rounded-lg py-2 flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-play"></i> Mulai Backtest
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <p id="btWarnings" class="text-xs text-amber-300">Uji riset, bukan bukti profit. EMA replay memakai sampel pembukaan candle, bukan setiap pergerakan intrabar. Fee 0,1% dan slippage 0,05% per sisi.</p>
+      <!-- Backtest Result Metrics -->
+      <div id="btMetricsGrid" class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Total Transaksi</div>
+          <div id="btTotalTrades" class="text-lg font-bold text-white mt-1">0</div>
+          <div id="btWinsLosses" class="text-xs text-gray-400">0 Win / 0 Loss</div>
+        </div>
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Win Rate</div>
+          <div id="btWinRate" class="text-lg font-bold text-emerald-400 mt-1">0.0%</div>
+          <div class="text-xs text-gray-500">Historical accuracy</div>
+        </div>
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Net Profit</div>
+          <div id="btNetProfit" class="text-lg font-bold text-white mt-1">+$0.00</div>
+          <div id="btNetPct" class="text-xs text-emerald-400">+0.00%</div>
+        </div>
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Profit Factor</div>
+          <div id="btProfitFactor" class="text-lg font-bold text-cyan-400 mt-1">0.00</div>
+          <div class="text-xs text-gray-500">Gross win / loss</div>
+        </div>
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Max Drawdown</div>
+          <div id="btMaxDd" class="text-lg font-bold text-rose-400 mt-1">0.0%</div>
+          <div class="text-xs text-gray-500">Max peak to trough</div>
+        </div>
+      </div>
+
+      <!-- Trade Log -->
+      <div class="glass-card rounded-xl p-4">
+        <h4 class="text-xs font-bold text-gray-300 uppercase mb-3">Jurnal Transaksi Historis</h4>
+        <div class="overflow-x-auto max-h-[300px]">
+          <table class="w-full text-left text-xs font-mono">
+            <thead class="bg-gray-900 text-gray-400 uppercase text-[10px]">
+              <tr>
+                <th class="p-2">Waktu Beli</th>
+                <th class="p-2">Waktu Jual</th>
+                <th class="p-2">Harga Beli</th>
+                <th class="p-2">Harga Jual</th>
+                <th class="p-2">PnL (%)</th>
+                <th class="p-2">PnL ($)</th>
+                <th class="p-2">Alasan Exit</th>
+              </tr>
+            </thead>
+            <tbody id="btTradesBody" class="divide-y divide-gray-800">
+              <tr>
+                <td colspan="7" class="text-center py-4 text-gray-500 font-sans">Belum ada data simulasi backtest.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 4: FORWARD TESTER (PAPER TRADING 24/7) ==================== -->
+    <div id="tab-paper" class="hidden space-y-4">
+      <div class="glass-card rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            🤖 Forward Testing Engine (Simulasi 24/7 Tanpa Henti)
+          </h3>
+          <p class="text-xs text-gray-400">Menguji strategi secara live dengan saldo virtual USDT tanpa risiko dana riil.</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="triggerPaperCycle()" class="px-3.5 py-1.5 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1.5">
+            <i class="fa-solid fa-bolt"></i> Jalankan 1 Siklus Scan
+          </button>
+          <button onclick="resetPaperBalance()" class="px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">
+            Reset Portofolio ($1000)
+          </button>
+        </div>
+      </div>
+
+      <!-- Portfolio Balance Cards -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Virtual Equity</div>
+          <div id="ptEquity" class="text-lg font-bold text-cyan-400 mt-1">$1,000.00</div>
+          <div id="ptReturnPct" class="text-xs text-emerald-400">+0.00% Total Return</div>
+        </div>
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Kas Bebas (USDT)</div>
+          <div id="ptCash" class="text-lg font-bold text-white mt-1">$1,000.00</div>
+          <div class="text-xs text-gray-500">Tersedia untuk order</div>
+        </div>
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Posisi Aktif</div>
+          <div id="ptOpenCount" class="text-lg font-bold text-yellow-400 mt-1">0 Koin</div>
+          <div class="text-xs text-gray-500">Sedang berjalan</div>
+        </div>
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Win Rate Live</div>
+          <div id="ptWinRate" class="text-lg font-bold text-emerald-400 mt-1">0.0%</div>
+          <div id="ptClosedCount" class="text-xs text-gray-400">0 Transaksi selesai</div>
+        </div>
+        <div class="glass-card p-3 rounded-xl">
+          <div class="text-xs text-gray-400">Scan Terakhir</div>
+          <div id="ptLastScan" class="text-xs font-mono text-gray-300 mt-2">-</div>
+          <div class="text-[10px] text-gray-500">Live 24/7 Watchlist</div>
+        </div>
+      </div>
+
+      <!-- Open Positions & History Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="glass-card rounded-xl p-4">
+          <h4 class="text-xs font-bold text-gray-300 uppercase mb-3 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Posisi Terbuka Saat Ini
+          </h4>
+          <div id="ptOpenList" class="space-y-2 text-xs">
+            <div class="text-gray-500 text-center py-4">Tidak ada posisi terbuka saat ini.</div>
+          </div>
+        </div>
+
+        <div class="glass-card rounded-xl p-4">
+          <h4 class="text-xs font-bold text-gray-300 uppercase mb-3 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-cyan-400"></span> Riwayat Eksekusi Paper Trade
+          </h4>
+          <div id="ptHistoryList" class="space-y-2 text-xs max-h-[300px] overflow-y-auto">
+            <div class="text-gray-500 text-center py-4">Belum ada riwayat transaksi.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 5: BOT & TELEGRAM SETTINGS ==================== -->
+    <div id="tab-settings" class="hidden space-y-4">
+      <div class="glass-card rounded-xl p-5 max-w-2xl mx-auto space-y-4">
+        <div>
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <i class="fa-brands fa-telegram text-cyan-400"></i> Uji Coba Bot Telegram 24/7
+          </h3>
+          <p class="text-xs text-gray-400 mt-1">Kirim pesan uji coba untuk memastikan token Telegram di .env sudah tersambung.</p>
+        </div>
+
+        <div class="p-3 bg-gray-900 rounded-lg text-xs space-y-2 text-gray-300">
+          <p>🔔 <b>Fitur Alert Telegram:</b></p>
+          <ul class="list-disc list-inside space-y-1 text-gray-400">
+            <li>Deteksi Paus Nyerok Murah (Bullish Divergence).</li>
+            <li>Mark-Up Breakout dengan lonjakan volume ungu.</li>
+            <li>Peringatan dini Cuci Piring (Whale Distribution).</li>
+            <li>Notifikasi eksekusi Paper Trading otomatis saat kamu offline.</li>
+          </ul>
+        </div>
+
+        <div>
+          <button onclick="testTelegramAlert()" class="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-xs flex items-center gap-2">
+            <i class="fa-solid fa-paper-plane"></i> Kirim Pesan Uji Coba Telegram
+          </button>
+          <div id="tgTestResult" class="mt-2 text-xs"></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-gray-800 bg-[#0d1322] px-4 py-3 text-center text-xs text-gray-500">
+    INETCRYP — BandarMetrics 24/7 Terminal &bull; Powered by Binance Public & Futures Stream
+  </footer>
+
+  <script>
+    // Optional API password: kept only in browser session storage.
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (input, init = {}) => {
+      const headers = new Headers(init.headers || {});
+      let password = sessionStorage.getItem("inetcryp_access_password") || "";
+      if (password) headers.set("X-Access-Password", password);
+      let response = await nativeFetch(input, { ...init, headers });
+      if (response.status === 401) {
+        password = window.prompt("Masukkan ACCESS_PASSWORD INETCRYP:") || "";
+        if (password) {
+          sessionStorage.setItem("inetcryp_access_password", password);
+          headers.set("X-Access-Password", password);
+          response = await nativeFetch(input, { ...init, headers });
+        }
+      }
+      return response;
+    };
+
+    // Global State
+    let currentSymbol = "BTCUSDT";
+    let currentTimeframe = "1h";
+    let candleChart = null;
+    let candleSeries = null;
+    let volumeSeries = null;
+    let bandarCostLine = null;
+    let lpmChart = null;
+    let lpmScoreSeries = null;
+    let lpmTriggerSeries = null;
+
+    // Initialize Charts on Load
+    window.addEventListener("DOMContentLoaded", () => {
+      initCharts();
+      loadChartData();
+      loadOrderbook();
+      loadWhalePrints();
+      loadPaperTrading();
+
+      // Poll whale prints & depth every 10s
+      setInterval(() => {
+        loadOrderbook();
+        loadWhalePrints();
+      }, 10000);
+    });
+
+    // Tab Switching
+    function switchTab(tabName) {
+      const tabs = ['terminal', 'screener', 'backtester', 'paper', 'settings'];
+      tabs.forEach(t => {
+        const el = document.getElementById(`tab-${t}`);
+        const btn = document.getElementById(`tabBtn-${t}`);
+        if (el && btn) {
+          if (t === tabName) {
+            el.classList.remove('hidden');
+            btn.className = "py-3 border-b-2 border-cyan-500 text-cyan-400 flex items-center gap-2";
+          } else {
+            el.classList.add('hidden');
+            btn.className = "py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2";
+          }
+        }
+      });
+
+      if (tabName === 'screener') loadScreener();
+      if (tabName === 'paper') loadPaperTrading();
+      if (tabName === 'terminal' && candleChart) {
+        candleChart.resize(document.getElementById('candleChartContainer').clientWidth, 380);
+        lpmChart.resize(document.getElementById('lpmChartContainer').clientWidth, 140);
+      }
+    }
+
+    // Chart Initialization
+    function initCharts() {
+      const candleContainer = document.getElementById("candleChartContainer");
+      const lpmContainer = document.getElementById("lpmChartContainer");
+
+      const chartOptions = {
+        layout: { background: { color: "#090d16" }, textColor: "#94a3b8" },
+        grid: {
+          vertLines: { color: "rgba(30, 41, 59, 0.4)" },
+          horzLines: { color: "rgba(30, 41, 59, 0.4)" }
+        },
+        timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#1e293b" },
+        rightPriceScale: { borderColor: "#1e293b" }
+      };
+
+      candleChart = LightweightCharts.createChart(candleContainer, {
+        ...chartOptions,
+        height: 380
+      });
+
+      candleSeries = candleChart.addCandlestickSeries({
+        upColor: "#10b981",
+        downColor: "#ef4444",
+        borderVisible: false,
+        wickUpColor: "#10b981",
+        wickDownColor: "#ef4444"
+      });
+
+      volumeSeries = candleChart.addHistogramSeries({
+        color: "#26a69a",
+        priceFormat: { type: "volume" },
+        priceScaleId: ""
+      });
+      volumeSeries.priceScale().applyOptions({
+        scaleMargins: { top: 0.8, bottom: 0 }
+      });
+
+      bandarCostLine = candleChart.addLineSeries({
+        color: "#38bdf8",
+        lineWidth: 2,
+        lineStyle: 2, // Dotted
+        title: "Modal Paus"
+      });
+
+      // LPM Subchart
+      lpmChart = LightweightCharts.createChart(lpmContainer, {
+        ...chartOptions,
+        height: 140
+      });
+
+      lpmScoreSeries = lpmChart.addLineSeries({
+        color: "#06b6d4",
+        lineWidth: 2,
+        title: "LPM Score"
+      });
+
+      lpmTriggerSeries = lpmChart.addLineSeries({
+        color: "#a855f7",
+        lineWidth: 1,
+        lineStyle: 1,
+        title: "EMA-9 Trigger"
+      });
+
+      // Synchronize scales
+      candleChart.timeScale().subscribeVisibleTimeRangeChange(range => {
+        if (range) lpmChart.timeScale().setVisibleRange(range);
+      });
+      lpmChart.timeScale().subscribeVisibleTimeRangeChange(range => {
+        if (range) candleChart.timeScale().setVisibleRange(range);
+      });
+
+      window.addEventListener("resize", () => {
+        candleChart.resize(candleContainer.clientWidth, 380);
+        lpmChart.resize(lpmContainer.clientWidth, 140);
+      });
+    }
+
+    // Load Chart & Metrics Data
+    async function loadChartData() {
+      try {
+        const resp = await fetch(`/api/chart-data?symbol=${currentSymbol}&timeframe=${currentTimeframe}&limit=200`);
+        const data = await resp.json();
+        if (data.status !== "ok") return;
+
+        document.getElementById("chartTitle").innerText = `${data.symbol} (${data.timeframe})`;
+
+        // Set series data
+        candleSeries.setData(data.candles);
+        volumeSeries.setData(data.volumes);
+        bandarCostLine.setData(data.bandar_cost);
+        lpmScoreSeries.setData(data.lpm_score);
+        lpmTriggerSeries.setData(data.lpm_trigger);
+
+        candleChart.timeScale().fitContent();
+
+        // Update Top Cards
+        const s = data.summary;
+        document.getElementById("statPrice").innerText = `$${s.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+        const chgEl = document.getElementById("statChange");
+        chgEl.innerText = `${s.change_pct >= 0 ? '+' : ''}${s.change_pct}%`;
+        chgEl.className = `text-xs font-semibold ${s.change_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+
+        document.getElementById("statPhase").innerText = s.phase;
+        document.getElementById("statSignal").innerText = s.action_signal;
+        loadSignalStatus();
+        document.getElementById("statLpm").innerHTML = `${s.lpm_score} <span class="text-xs text-gray-400">/ 100</span>`;
+        document.getElementById("statSlipstream").innerText = `Slipstream: ${s.slipstream}`;
+        document.getElementById("statBandarCost").innerText = `$${s.bandar_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+        document.getElementById("statDistBandar").innerText = `${s.dist_bandar_pct >= 0 ? '+' : ''}${s.dist_bandar_pct}% (${s.valuation_zone})`;
+        document.getElementById("statIntensity").innerText = `${s.intensity}x`;
+        document.getElementById("statSpike").innerText = s.intensity >= 2.0 ? "🟣 ANOMALY SPIKE" : "Normal Flow";
+      } catch (err) {
+        console.error("Failed loading chart data", err);
+      }
+    }
+
+    async function loadSignalStatus() {
+      try {
+        const resp = await fetch(`/api/signal?symbol=${currentSymbol}&timeframe=${currentTimeframe}`);
+        const data = await resp.json();
+        if (data.status !== "ok") return;
+        const signal = data.signal;
+        const cross = data.cross_exchange;
+        const label = document.getElementById("statCrossSignal");
+        label.innerText = `${signal.label} ${signal.score}/100`;
+        label.className = `text-base font-bold mt-1 ${signal.score >= 70 ? 'text-emerald-400' : signal.score <= 30 ? 'text-rose-400' : 'text-yellow-400'}`;
+        document.getElementById("statCrossMeta").innerText = `Coverage: ${cross.exchange_count}/3 | Confidence: ${signal.confidence_pct}%`;
+      } catch (err) {
+        document.getElementById("statCrossSignal").innerText = "Unavailable";
+      }
+    }
+
+    // Load Orderbook Depth
+    async function loadOrderbook() {
+      try {
+        const resp = await fetch(`/api/orderbook?symbol=${currentSymbol}`);
+        const json = await resp.json();
+        if (json.status !== "ok") return;
+
+        const d = json.data;
+        document.getElementById("statBidRatio").innerText = `${d.bid_ask_ratio}x Ratio`;
+        document.getElementById("statBidPct").innerText = `${d.bid_pressure_pct}% Bids vs ${Math.round(100 - d.bid_pressure_pct)}% Asks`;
+
+        // Render walls
+        const wallEl = document.getElementById("whaleWallsList");
+        if (!d.whale_walls || d.whale_walls.length === 0) {
+          wallEl.innerHTML = '<div class="text-gray-500 text-center py-2">Tidak ada dinding tebal</div>';
+        } else {
+          wallEl.innerHTML = d.whale_walls.map(w => {
+            const isBuy = w.type === 'BUY_WALL';
+            return `
+              <div class="flex items-center justify-between p-1 rounded ${isBuy ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/50' : 'bg-rose-950/40 text-rose-400 border border-rose-900/50'}">
+                <span>${isBuy ? '🛡️ Buy Wall' : '🧱 Sell Wall'} @ $${w.price}</span>
+                <span class="font-bold">$${(w.val_usdt / 1000).toFixed(0)}k</span>
+              </div>
+            `;
+          }).join('');
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Load Whale Prints (> $30k)
+    async function loadWhalePrints() {
+      try {
+        const resp = await fetch(`/api/whale-prints?symbol=${currentSymbol}&min_usdt=10000`);
+        const json = await resp.json();
+        if (json.status !== "ok") return;
+
+        const el = document.getElementById("whaleTapeList");
+        if (!json.data || json.data.length === 0) {
+          el.innerHTML = '<div class="text-gray-500 text-center py-4">Belum ada transaksi &gt;$30k baru</div>';
+        } else {
+          el.innerHTML = json.data.map(p => {
+            const isBuy = p.side === 'BUY';
+            return `
+              <div class="flex items-center justify-between py-1 border-b border-gray-800/50 ${isBuy ? 'text-emerald-400' : 'text-rose-400'}">
+                <span>${p.time}</span>
+                <span class="font-bold">${p.side} $${p.price}</span>
+                <span>$${(p.val_usdt / 1000).toFixed(1)}k</span>
+              </div>
+            `;
+          }).join('');
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Screener Logic
+    let currentScreenerPreset = "all";
+    async function loadScreener() {
+      const tbody = document.getElementById("screenerTableBody");
+      tbody.innerHTML = '<tr><td colspan="10" class="text-center py-6 text-gray-500 font-sans">Scanning 30 koin liquid di Binance...</td></tr>';
+
+      try {
+        const resp = await fetch(`/api/screener?timeframe=${currentTimeframe}&preset=${currentScreenerPreset}&limit=35`);
+        const json = await resp.json();
+        if (json.status !== "ok" || !json.data || json.data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="10" class="text-center py-6 text-gray-500 font-sans">Tidak ada koin yang sesuai preset.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = json.data.map(item => {
+          const isUp = item.change_pct >= 0;
+          return `
+            <tr class="hover:bg-gray-800/40 cursor-pointer" onclick="changeSymbol('${item.symbol}'); switchTab('terminal');">
+              <td class="p-3 font-bold text-white flex items-center gap-1.5">
+                <span class="text-cyan-400">🪙</span> ${item.symbol}
+              </td>
+              <td class="p-3 text-gray-200">$${item.price}</td>
+              <td class="p-3 font-bold ${isUp ? 'text-emerald-400' : 'text-rose-400'}">${isUp ? '+' : ''}${item.change_pct}%</td>
+              <td class="p-3 text-gray-400">$${(item.volume_usdt / 1000000).toFixed(1)}M</td>
+              <td class="p-3 font-bold ${item.lpm_score >= 55 ? 'text-cyan-400' : 'text-gray-400'}">${item.lpm_score}</td>
+              <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300">${item.phase}</span></td>
+              <td class="p-3 text-purple-400">$${item.bandar_cost}</td>
+              <td class="p-3 ${item.dist_bandar_pct <= 2 ? 'text-emerald-400' : 'text-gray-300'}">${item.dist_bandar_pct}%</td>
+              <td class="p-3 font-bold ${item.intensity >= 2 ? 'text-purple-400' : 'text-gray-400'}">${item.intensity}x</td>
+              <td class="p-3 text-right">
+                <span class="px-2.5 py-1 rounded-full text-[10px] font-sans font-bold bg-${item.badge_color === 'success' ? 'emerald' : item.badge_color === 'danger' ? 'rose' : item.badge_color === 'primary' ? 'cyan' : 'gray'}-950 text-${item.badge_color === 'success' ? 'emerald' : item.badge_color === 'danger' ? 'rose' : item.badge_color === 'primary' ? 'cyan' : 'gray'}-400 border border-gray-800">
+                  ${item.action_signal}
+                </span>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (err) {
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center py-6 text-rose-500 font-sans">Gagal memuat screener.</td></tr>';
+      }
+    }
+
+    function setScreenerPreset(preset) {
+      currentScreenerPreset = preset;
+      document.querySelectorAll(".screener-filter-btn").forEach(btn => {
+        if (btn.dataset.preset === preset) {
+          btn.className = "screener-filter-btn px-3 py-1.5 text-xs rounded-lg bg-cyan-600 text-white font-medium";
+        } else {
+          btn.className = "screener-filter-btn px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium";
+        }
+      });
+      loadScreener();
+    }
+
+    // Change Symbol & Timeframe
+    function changeSymbol(sym) {
+      if (!sym) return;
+      currentSymbol = sym.toUpperCase().replace("/", "");
+      document.getElementById("symbolInput").value = currentSymbol;
+      document.getElementById("btSymbol").value = currentSymbol;
+      loadChartData();
+      loadOrderbook();
+      loadWhalePrints();
+    }
+
+    function changeTimeframe(tf) {
+      currentTimeframe = tf;
+      document.querySelectorAll("#tfSelector button").forEach(b => {
+        if (b.dataset.tf === tf) {
+          b.className = "px-2.5 py-1 text-xs font-medium rounded bg-cyan-600 text-white";
+        } else {
+          b.className = "px-2.5 py-1 text-xs font-medium rounded text-gray-400 hover:text-white";
+        }
+      });
+      loadChartData();
+    }
+
+    // Gemini AI Analysis
+    async function askGeminiAI() {
+      const card = document.getElementById("aiAnalysisCard");
+      const content = document.getElementById("aiAnalysisContent");
+      card.classList.remove("hidden");
+      content.innerHTML = '<div class="py-4 text-center text-cyan-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Menganalisis pergerakan paus dengan Google Gemini...</div>';
+
+      try {
+        const resp = await fetch(`/api/ai-analyze?symbol=${currentSymbol}&timeframe=${currentTimeframe}`);
+        const json = await resp.json();
+        if (json.status === "ok") {
+          content.innerText = json.analysis;
+        } else {
+          content.innerText = "Gagal memproses analisis AI: " + (json.detail || "Error");
+        }
+      } catch (err) {
+        content.innerText = "Error menghubungi server: " + err.message;
+      }
+    }
+
+    // Backtest
+    async function runBacktest() {
+      const sym = document.getElementById("btSymbol").value;
+      const tf = document.getElementById("btTimeframe").value;
+      const strat = document.getElementById("btStrategy").value;
+      const tp = document.getElementById("btTp").value;
+      const sl = document.getElementById("btSl").value;
+
+      try {
+        document.getElementById("btWarnings").innerText = "Memproses replay; EMA 15m memakai 180 hari historis dan cache lokal. Ini uji satu konfigurasi, bukan seleksi kandidat holdout.";
+        const bars = strat === 'ema_pullback_v1' && tf === '15m' ? 17280 : 400;
+        const resp = await fetch(`/api/backtest?symbol=${encodeURIComponent(sym)}&timeframe=${tf}&strategy=${strat}&tp=${tp}&sl=${sl}&bars=${bars}`);
+        const json = await resp.json();
+        if (json.status !== "ok" || !json.result) return;
+
+        const r = json.result;
+        if (r.error) { document.getElementById("btWarnings").innerText = r.error; return; }
+        document.getElementById("btWarnings").innerText = (r.warnings || ["Legacy simulator; bukan validasi EMA paper."]).join(" ");
+        document.getElementById("btTotalTrades").innerText = r.total_trades;
+        document.getElementById("btWinsLosses").innerText = `${r.winning_trades} Win / ${r.losing_trades} Loss`;
+        document.getElementById("btWinRate").innerText = `${r.win_rate_pct}%`;
+        document.getElementById("btNetProfit").innerText = `${r.net_pnl_usd >= 0 ? '+' : ''}$${r.net_pnl_usd}`;
+        document.getElementById("btNetPct").innerText = `${r.net_pnl_pct >= 0 ? '+' : ''}${r.net_pnl_pct}%`;
+        document.getElementById("btProfitFactor").innerText = r.profit_factor == null ? 'N/A' : Number(r.profit_factor).toFixed(2);
+        document.getElementById("btMaxDd").innerText = `${r.max_drawdown_pct}%`;
+
+        // Render trades
+        const tbody = document.getElementById("btTradesBody");
+        if (!r.trades || r.trades.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500 font-sans">Tidak ada transaksi yang terpicu.</td></tr>';
+        } else {
+          tbody.innerHTML = r.trades.map(t => {
+            const isWin = t.pnl_usd > 0;
+            return `
+              <tr class="border-b border-gray-800/40">
+                <td class="p-2 text-gray-400">${t.entry_time.slice(0, 16)}</td>
+                <td class="p-2 text-gray-400">${t.exit_time.slice(0, 16)}</td>
+                <td class="p-2">$${t.entry_price}</td>
+                <td class="p-2">$${t.exit_price}</td>
+                <td class="p-2 font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}">${isWin ? '+' : ''}${t.pnl_pct}%</td>
+                <td class="p-2 font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}">${isWin ? '+' : ''}$${t.pnl_usd}</td>
+                <td class="p-2 text-gray-300 font-sans">${t.reason}</td>
+              </tr>
+            `;
+          }).join('');
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Paper Trading (Forward Testing)
+    async function loadPaperTrading() {
+      try {
+        const resp = await fetch("/api/paper-trading/status");
+        const json = await resp.json();
+        if (json.status !== "ok") return;
+
+        const d = json.data;
+        document.getElementById("ptEquity").innerText = `$${d.equity.toLocaleString()}`;
+        document.getElementById("ptReturnPct").innerText = `${d.net_return_pct >= 0 ? '+' : ''}${d.net_return_pct}% Total Return`;
+        document.getElementById("ptCash").innerText = `$${d.cash_usdt.toLocaleString()}`;
+        document.getElementById("ptOpenCount").innerText = `${d.open_positions_count} Koin`;
+        document.getElementById("ptWinRate").innerText = `${d.win_rate_pct}%`;
+        document.getElementById("ptClosedCount").innerText = `${d.closed_trades_count} Transaksi selesai`;
+        document.getElementById("ptLastScan").innerText = d.last_scan_time || "-";
+
+        // Open Positions
+        const openEl = document.getElementById("ptOpenList");
+        const openKeys = Object.keys(d.open_positions || {});
+        if (openKeys.length === 0) {
+          openEl.innerHTML = '<div class="text-gray-500 text-center py-4">Tidak ada posisi terbuka saat ini.</div>';
+        } else {
+          openEl.innerHTML = openKeys.map(k => {
+            const p = d.open_positions[k];
+            return `
+              <div class="p-2.5 rounded-lg bg-gray-900 border border-gray-800 flex justify-between items-center">
+                <div>
+                  <div class="font-bold text-white">${k}</div>
+                  <div class="text-[11px] text-gray-400">Entry: $${p.entry_price} &bull; Modal: $${p.size_usd}</div>
+                  <div class="text-[10px] text-cyan-400">${p.signal}</div>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800">RUNNING</span>
+              </div>
+            `;
+          }).join('');
+        }
+
+        // History
+        const histEl = document.getElementById("ptHistoryList");
+        if (!d.history || d.history.length === 0) {
+          histEl.innerHTML = '<div class="text-gray-500 text-center py-4">Belum ada riwayat transaksi.</div>';
+        } else {
+          histEl.innerHTML = d.history.slice().reverse().map(h => {
+            const isWin = h.pnl_usd > 0;
+            return `
+              <div class="p-2 rounded bg-gray-900 border border-gray-800 flex justify-between items-center">
+                <div>
+                  <div class="font-bold text-white">${h.symbol} <span class="text-[10px] font-normal text-gray-400">${h.exit_time.slice(11)}</span></div>
+                  <div class="text-[10px] text-gray-400">${h.reason}</div>
+                </div>
+                <div class="text-right">
+                  <div class="font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}">${isWin ? '+' : ''}${h.pnl_pct}%</div>
+                  <div class="text-[10px] text-gray-400">${isWin ? '+' : ''}$${h.pnl_usd}</div>
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function triggerPaperCycle() {
+      try {
+        const resp = await fetch("/api/paper-trading/run?timeframe=15m", { method: "POST" });
+        await loadPaperTrading();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function resetPaperBalance() {
+      if (!confirm("Reset saldo simulasi paper trade ke $1,000 USDT?")) return;
+      try {
+        await fetch("/api/paper-trading/reset?initial_balance=1000", { method: "POST" });
+        await loadPaperTrading();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Telegram Test
+    async function testTelegramAlert() {
+      const resEl = document.getElementById("tgTestResult");
+      resEl.innerHTML = '<span class="text-cyan-400"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Mengirim pesan ke bot Telegram...</span>';
+      try {
+        const resp = await fetch("/api/telegram/test", { method: "POST" });
+        const json = await resp.json();
+        if (json.status === "ok") {
+          resEl.innerHTML = '<span class="text-emerald-400 font-bold"><i class="fa-solid fa-check mr-1"></i> Pesan berhasil dikirim ke Telegram kamu!</span>';
+        } else {
+          resEl.innerHTML = `<span class="text-rose-400 font-bold"><i class="fa-solid fa-triangle-exclamation mr-1"></i> ${json.message}</span>`;
+        }
+      } catch (err) {
+        resEl.innerHTML = `<span class="text-rose-400 font-bold">Error: ${err.message}</span>`;
+      }
+    }
+  </script>
+</body>
+</html>

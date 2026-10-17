@@ -1,0 +1,8 @@
+{
+  "paper_new_entries_enabled": false,
+  "mode": "research_quarantine",
+  "reason": "EMA pullback candidates failed 180-day development and final holdout on BTCUSDT, ETHUSDT, and SOLUSDT after costs.",
+  "research_run": "data/research/candidates-20261007T052436609319/summary.json",
+  "positions_policy": "manage_existing_only",
+  "changed_at": "2026-10-07T05:29:00Z"
+}
