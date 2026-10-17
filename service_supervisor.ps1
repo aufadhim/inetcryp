@@ -28,7 +28,27 @@ function Test-ServerPort {
 function Start-Tunnel {
     $out = Join-Path $LogRoot 'cloudflared.out.log'
     $err = Join-Path $LogRoot 'cloudflared.err.log'
-    return Start-Process -FilePath $Cloudflared -ArgumentList @('tunnel','--no-autoupdate','--url','http://127.0.0.1:8091') -WorkingDirectory $AppRoot -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+    Remove-Item -LiteralPath $out,$err -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $AppRoot 'data\public_report_url.txt') -Force -ErrorAction SilentlyContinue
+    $env:REPORT_PUBLIC_URL = $null
+    # The office network permits HTTP/2 but blocks/degrades outbound QUIC.
+    return Start-Process -FilePath $Cloudflared -ArgumentList @('tunnel','--no-autoupdate','--protocol','http2','--url','http://127.0.0.1:8091') -WorkingDirectory $AppRoot -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+}
+
+function Wait-TunnelUrl([System.Diagnostics.Process]$TunnelProcess) {
+    $pattern = 'https://[a-z0-9-]+\.trycloudflare\.com'
+    $logs = @((Join-Path $LogRoot 'cloudflared.out.log'), (Join-Path $LogRoot 'cloudflared.err.log'))
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        Start-Sleep -Seconds 2
+        if ($TunnelProcess.HasExited) { return $null }
+        foreach ($log in $logs) {
+            if (Test-Path $log) {
+                $match = Select-String -Path $log -Pattern $pattern | Select-Object -Last 1
+                if ($match) { return $match.Matches[0].Value }
+            }
+        }
+    }
+    return $null
 }
 
 $children = @{}
@@ -56,17 +76,12 @@ try {
         if (Test-Path $Cloudflared) {
             if (-not $children.ContainsKey('tunnel') -or $children['tunnel'].HasExited) {
                 $children['tunnel'] = Start-Tunnel
-                Start-Sleep -Seconds 5
-                $tunnelLogs = @((Join-Path $LogRoot 'cloudflared.out.log'), (Join-Path $LogRoot 'cloudflared.err.log'))
-                foreach ($tunnelLog in $tunnelLogs) {
-                    if (Test-Path $tunnelLog) {
-                        $match = Select-String -Path $tunnelLog -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' | Select-Object -Last 1
-                        if ($match) {
-                            $env:REPORT_PUBLIC_URL = "$($match.Matches[0].Value)/latest.html"
-                            [IO.File]::WriteAllText((Join-Path $AppRoot 'data\public_report_url.txt'), $env:REPORT_PUBLIC_URL)
-                            break
-                        }
-                    }
+                $tunnelBaseUrl = Wait-TunnelUrl $children['tunnel']
+                if ($tunnelBaseUrl) {
+                    $env:REPORT_PUBLIC_URL = "$tunnelBaseUrl/latest.html"
+                    [IO.File]::WriteAllText((Join-Path $AppRoot 'data\public_report_url.txt'), $env:REPORT_PUBLIC_URL)
+                } else {
+                    Write-SupervisorStatus 'degraded' 'Tunnel aktif tetapi URL baru belum tersedia; link lama tidak digunakan.'
                 }
                 if ($env:REPORT_PUBLIC_URL) {
                         if ($children.ContainsKey('paper') -and -not $children['paper'].HasExited) {
