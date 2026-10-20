@@ -47,7 +47,7 @@ class LabTests(unittest.TestCase):
 
     def test_forward_gate_requires_actual_observation_coverage(self):
         s=account()
-        s.update(first_at="2025-01-01T00:00:00Z",last_at="2025-02-02T00:00:00Z",equity=1100)
+        s.update(first_at="2025-01-01T00:00:00Z",last_at="2025-02-02T00:00:00Z",equity=1100,execution_model="observed_depth_v1",valuation_complete=True)
         s["trades"]=[{"symbol":str(i%3),"pnl_usd":.5} for i in range(210)]
         self.assertFalse(forward_gate(s)["eligible"])
         s["observed_steps"]=32*96+1

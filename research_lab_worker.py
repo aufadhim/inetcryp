@@ -17,6 +17,7 @@ ROOT = Path("data/lab")
 
 def atomic(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.name=="progress.json":data={**data,"at":datetime.now(timezone.utc).isoformat()}
     temp = path.with_suffix(".tmp")
     temp.write_text(json.dumps(data, indent=2, allow_nan=False), encoding="utf-8")
     temp.replace(path)
@@ -100,7 +101,7 @@ def research(reg, symbols):
     key = VERSION+":"+end.isoformat()
     active=reg.get("state","active_experiment")
     active_plan=reg.get("experiment",active) if active else None
-    if active_plan and active_plan.get("status") not in {"completed","insufficient_data","rejected_validation"}:
+    if active_plan and active.startswith(VERSION+":") and active_plan.get("status") not in {"completed","insufficient_data","rejected_validation"}:
         key=active
         end=pd.Timestamp(active_plan["end"])
     previous = reg.get("experiment",key)
@@ -170,15 +171,22 @@ def research(reg, symbols):
     validation = simulate(frames,c,split_a,split_b)
     stress = simulate(frames,c,split_a,split_b,cost=2)
     latency = simulate(frames,c,split_a,split_b,cost=2,delay_bars=1)
+    from engine.research_analysis import baselines,benchmark_gate
+    benchmarks=baselines(frames,split_a,split_b)
+    baseline_decision=benchmark_gate(validation,benchmarks)
+    atomic(ROOT/"loss-diagnosis.json",{"experiment":key,"candidate":c.id,"validation":validation.get("diagnostics"),
+        "baselines":benchmarks,"baseline_gate":baseline_decision})
     folds = [simulate(frames,c,split_a+pd.Timedelta(days=12*i),split_a+pd.Timedelta(days=12*(i+1))) for i in range(3)]
     if now<end:
         failed=[]
+        failed.extend(baseline_decision["reasons"])
         for name,result in (("validation",validation),("double_cost",stress),("latency_stress",latency)):
             if (result["net_pnl"]<=0 or result["expectancy"]<=0 or result["profit_factor"]<1.3
                     or result["trades"]<30 or result["max_drawdown_pct"]>5):
                 failed.append(name+": failed before prospective holdout")
         plan.update(status="awaiting_fresh_holdout",development=development,selected=asdict_candidate(c),validation=validation,
                     double_cost=stress,latency_stress=latency,walk_forward=folds,
+                    baselines=benchmarks,baseline_gate=baseline_decision,
                     gate={"eligible":False,"reasons":["Development and validation complete; prospective holdout still collecting"]})
         if failed:
             plan.update(status="rejected_validation",gate={"eligible":False,"reasons":failed})
@@ -188,26 +196,24 @@ def research(reg, symbols):
         return
     # Only the development winner can consume final holdout.
     holdout = simulate(frames,c,holdout_start,end)
+    holdout_baselines=baselines(frames,holdout_start,end)
+    holdout_baseline_gate=benchmark_gate(holdout,holdout_baselines)
     cross = [simulate({s:f},c,holdout_start,end) for s,f in frames.items()]
     gate = research_gate(validation,stress,holdout,folds,cross)
+    gate["reasons"].extend(baseline_decision["reasons"]+holdout_baseline_gate["reasons"])
+    gate["eligible"]=not gate["reasons"]
     if latency["net_pnl"]<=0 or latency["expectancy"]<=0:
         gate["reasons"].append("latency_stress: negative edge after one-bar delay")
         gate["eligible"]=False
     plan.update(status="completed",development=development,selected=asdict_candidate(c),validation=validation,
-                double_cost=stress,latency_stress=latency,holdout=holdout,walk_forward=folds,cross_coin=cross,gate=gate)
+                double_cost=stress,latency_stress=latency,holdout=holdout,walk_forward=folds,cross_coin=cross,gate=gate,
+                baselines=benchmarks,baseline_gate=baseline_decision,holdout_baselines=holdout_baselines)
     reg.put("experiment",key,plan)
     reg.event("research_decision", {"experiment":key,"candidate":c.id,**gate})
     atomic(ROOT/"research-latest.json",plan)
     if gate["eligible"]:
-        tournament = reg.get("state","tournament",{})
-        for old_id,old in list(tournament.items()):
-            if old["status"].startswith("paused") and not old["account"]["positions"]:
-                reg.put("retired_account",old_id,old)
-                del tournament[old_id]
-        if c.id not in tournament and len(tournament)<3:
-            tournament[c.id] = {"candidate":asdict_candidate(c),"experiment":key,"account":account(),"status":"challenger"}
-            reg.put("state","tournament",tournament)
-            reg.event("promoted_to_challenger", {"candidate":c.id,"scope":"isolated_paper_only"})
+        reg.put("admission",c.id,{"candidate":asdict_candidate(c),"experiment":key,"status":"queued"})
+        reg.event("paper_admission_queued",{"candidate":c.id,"scope":"isolated_paper_only"})
 
 
 def asdict_candidate(c):
@@ -216,44 +222,64 @@ def asdict_candidate(c):
 
 
 def tournament_cycle(reg,symbols):
+    from engine.observed_paper import MODEL, observed_step
     tournament = reg.get("state","tournament",{})
+    # The monitor is the sole writer of paper accounts. Research only queues admissions.
+    for row in list(reg.db.execute("SELECT id,payload FROM records WHERE kind='admission'")):
+        admission=json.loads(row[1])
+        if admission["status"]!="queued":continue
+        for old_id,old in list(tournament.items()):
+            if old["status"].startswith("paused") and not old["account"]["positions"]:
+                reg.put("retired_account",old_id,old);del tournament[old_id]
+        if row[0] in tournament:
+            admission["status"]="consumed";reg.put("admission",row[0],admission)
+            continue
+        if len(tournament)>=3:continue
+        c=Candidate(**admission["candidate"]["parameters"]).validate()
+        if c.id!=row[0]:continue
+        tournament[c.id]={"candidate":admission["candidate"],"experiment":admission["experiment"],"account":account(),"status":"challenger"}
+        reg.put("state","tournament",tournament)
+        admission["status"]="consumed";reg.put("admission",row[0],admission)
+        reg.event("promoted_to_challenger",{"candidate":c.id})
     champion = reg.get("state","champion")
     rows = []
     prepared = {}
     required = set(symbols)
     for entry in tournament.values():
         required.update(entry["account"]["positions"])
+    books={}
     for symbol in sorted(required) if tournament else []:
-        raw = public("klines",symbol=symbol,interval="15m",limit=300)
-        frame = pd.DataFrame({"Open":[float(x[1]) for x in raw[:-1]],"High":[float(x[2]) for x in raw[:-1]],
-            "Low":[float(x[3]) for x in raw[:-1]],"Close":[float(x[4]) for x in raw[:-1]],"Volume":[float(x[5]) for x in raw[:-1]]},
-            index=pd.to_datetime([x[0] for x in raw[:-1]],unit="ms",utc=True))
-        prepared[symbol] = features(frame)
+        try:
+            raw = public("klines",symbol=symbol,interval="15m",limit=300)
+            frame = pd.DataFrame({"Open":[float(x[1]) for x in raw[:-1]],"High":[float(x[2]) for x in raw[:-1]],
+                "Low":[float(x[3]) for x in raw[:-1]],"Close":[float(x[4]) for x in raw[:-1]],"Volume":[float(x[5]) for x in raw[:-1]]},
+                index=pd.to_datetime([x[0] for x in raw[:-1]],unit="ms",utc=True))
+            prepared[symbol] = features(frame)
+            started=time.perf_counter()
+            book=public("depth",symbol=symbol,limit=20)
+            books[symbol]={"bids":book["bids"],"asks":book["asks"],
+                "latency_ms":(time.perf_counter()-started)*1000,"received_at":datetime.now(timezone.utc).isoformat()}
+        except (requests.RequestException,ValueError,KeyError,TypeError) as exc:
+            reg.event("paper_market_unavailable",{"symbol":symbol,"error_type":type(exc).__name__})
     for cid, entry in tournament.items():
         c = Candidate(**entry["candidate"]["parameters"]).validate()
         if c.id!=cid:
             entry["status"]="paused_execution_model_changed"
         state = entry["account"]
-        pending = {}
+        observations={}
+        if state.get("execution_model")!=MODEL and (state["trades"] or state["positions"]):
+            entry["status"]="paused_execution_model_changed"
         for symbol, f in prepared.items():
+            if symbol not in books:continue
             mask = signals(f,c)
-            last = state["seen"].get(symbol)
-            # On first enrollment, only observe the most recent completed bar.
-            if not last:
+            if not state["first_at"]:
                 state["seen"][symbol] = f.index[-1].isoformat()
-                continue
-            indices = [i for i in range(100,len(f)) if f.index[i] > pd.Timestamp(last)]
-            if last and pd.Timestamp(last) < f.index[99]:
-                entry["status"] = "paused_data_gap"
-                reg.event("paper_gap", {"candidate":cid,"symbol":symbol})
-                continue
-            for i in indices:
-                bars,entries = pending.setdefault(f.index[i],({},{}))
-                bars[symbol],entries[symbol] = f.iloc[i],bool(mask[i-1])
-                bars[symbol]=bars[symbol].to_dict()
-                bars[symbol]["decision_quote_volume"]=float(f.iloc[i-1].Close*f.iloc[i-1].Volume)
-        for stamp,(bars,entries) in sorted(pending.items()):
-            advance(state,c,bars,entries,stamp,allow_entry=entry["status"] in {"challenger","champion"})
+            atr=float(f.iloc[-1].atr_pct)
+            observations[symbol]={"book":books[symbol],"signal":bool(mask[-1]),"candle_at":f.index[-1].isoformat(),
+                "regime":str(f.iloc[-1].regime),"volatility":"high" if atr>=1.5 else "medium" if atr>=.5 else "low"}
+        if not entry["status"].startswith("paused_execution"):
+            events=observed_step(state,c,observations,allow_entry=entry["status"] in {"challenger","champion"})
+            for event in events:reg.event("observed_paper_execution",{"candidate":cid,**event})
         performance = forward_gate(state)
         if performance["max_drawdown_pct"] > 5:
             entry["status"] = "paused_drawdown"
@@ -311,7 +337,8 @@ def adviser(reg):
         'Setiap hypothesis berisi family, stop_pct (0.5..3), target_pct (1..8), hold_bars (integer 4..48), '
         'volume_ratio (1..3). family harus salah satu families. Hindari kode dan janji profit. Konteks: '+
         json.dumps({"families":[c.family for c in candidates()[::2]],"gate":research_result.get("gate"),
-            "validation":research_result.get("validation"),"holdout":research_result.get("holdout")}))
+            "validation":research_result.get("validation"),"holdout":research_result.get("holdout"),
+            "baselines":research_result.get("baselines"),"diagnostic_interpretation":"Groups describe associations; avoid tuning to small samples"}))
     response = generate({"contents":[{"parts":[{"text":prompt}]}],
         "generationConfig":{"maxOutputTokens":8192,"responseMimeType":"application/json"}},
         os.environ["GEMINI_API_KEY"],operation="research_lab")
@@ -344,11 +371,11 @@ def adviser(reg):
     return result
 
 
-def main(once=False):
+def main(once=False,role="monitor"):
     ROOT.mkdir(parents=True,exist_ok=True)
     # A second worker must not run concurrent experiments/accounts.
     import msvcrt
-    lock = open(ROOT/"worker.lock","a+b")
+    lock = open(ROOT/("worker-"+role+".lock"),"a+b")
     lock.seek(0)
     try:
         msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
@@ -358,33 +385,40 @@ def main(once=False):
     symbols = []
     while True:
         try:
-            atomic(ROOT/"status.json",{"status":"running","phase":"research","at":datetime.now(timezone.utc).isoformat()})
+            heartbeat=ROOT/(role+"_status.json")
+            atomic(heartbeat,{"status":"running","role":role,"at":datetime.now(timezone.utc).isoformat()})
             symbols = universe(reg)
-            from engine.research_data import collect_sources
-            sources=collect_sources(reg,symbols)
-            research(reg,symbols)
-            tournament = tournament_cycle(reg,symbols)
-            try:
+            if role=="research":
+                research(reg,symbols)
+                legacy_path=Path("data/paper_trading_journal.json")
+                if legacy_path.exists():
+                    from engine.research_analysis import diagnose
+                    legacy=json.loads(legacy_path.read_text(encoding="utf-8"))
+                    atomic(ROOT/"legacy-loss-diagnosis.json",{"source":"legacy_journal","diagnostics":diagnose(legacy.get("history",[]))})
+            elif role=="collector":
+                from engine.research_data import collect_sources
+                collect_sources(reg,symbols)
                 archive_orderbooks(reg,symbols)
-            except Exception as exc:
-                reg.event("orderbook_unavailable",{"error_type":type(exc).__name__})
-            try:
                 discovery(reg)
-            except Exception as exc:
-                reg.event("discovery_unavailable",{"error_type":type(exc).__name__})
-            advice = adviser(reg)
-            atomic(ROOT/"status.json",{"status":"sleeping","at":datetime.now(timezone.utc).isoformat(),
-                "version":VERSION,"symbols":symbols,"tournament":tournament,"adviser":advice,
-                "sources":sources,
-                "research":json.loads((ROOT/"research-latest.json").read_text(encoding="utf-8")) if (ROOT/"research-latest.json").exists() else {"status":"pending_or_insufficient_data"}})
+            else:
+                tournament = tournament_cycle(reg,symbols)
+                atomic(ROOT/"status.json",{"status":"sleeping","at":datetime.now(timezone.utc).isoformat(),
+                    "version":VERSION,"symbols":symbols,"tournament":tournament,
+                    "sources":reg.get("state","source_health",{}),"adviser":reg.get("advice",datetime.now(timezone.utc).date().isoformat(),{}),
+                    "research":json.loads((ROOT/"research-latest.json").read_text(encoding="utf-8")) if (ROOT/"research-latest.json").exists() else {"status":"pending"}})
+            atomic(heartbeat,{"status":"sleeping","role":role,"at":datetime.now(timezone.utc).isoformat(),"symbols":symbols})
         except Exception as exc:
-            atomic(ROOT/"status.json",{"status":"error","at":datetime.now(timezone.utc).isoformat(),"error_type":type(exc).__name__})
+            atomic(ROOT/(role+"_status.json"),{"status":"error","role":role,"at":datetime.now(timezone.utc).isoformat(),"error_type":type(exc).__name__})
         if once:
             break
-        time.sleep(300)
+        time.sleep(30 if role=="monitor" else 300)
+    reg.db.close()
+    lock.close()
 
 
 if __name__=="__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument("--once",action="store_true")
-    main(parser.parse_args().once)
+    parser.add_argument("--role",choices=["monitor","research","collector"],default="monitor")
+    args=parser.parse_args()
+    main(args.once,args.role)

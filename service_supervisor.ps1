@@ -65,7 +65,13 @@ try {
             $children['paper'] = Start-AppProcess 'paper' @('worker.py')
         }
         if (-not $children.ContainsKey('research-lab') -or $children['research-lab'].HasExited) {
-            $children['research-lab'] = Start-AppProcess 'research-lab' @('research_lab_worker.py')
+            $children['research-lab'] = Start-AppProcess 'research-lab' @('research_lab_worker.py','--role','monitor')
+        }
+        if (-not $children.ContainsKey('research-experiments') -or $children['research-experiments'].HasExited) {
+            $children['research-experiments'] = Start-AppProcess 'research-experiments' @('research_lab_worker.py','--role','research')
+        }
+        if (-not $children.ContainsKey('research-collector') -or $children['research-collector'].HasExited) {
+            $children['research-collector'] = Start-AppProcess 'research-collector' @('research_lab_worker.py','--role','collector')
         }
         if (-not $children.ContainsKey('compression-research') -or $children['compression-research'].HasExited) {
             $children['compression-research'] = Start-AppProcess 'compression-research' @('compression_research_worker.py')

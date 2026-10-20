@@ -102,7 +102,8 @@ class ResearchQualityTests(unittest.TestCase):
             prior=pd.Timestamp.now(tz="UTC").floor("D")
             reg.put("experiment","legacy",{"status":"completed","end":prior.isoformat(),"holdout":{}})
             result={"net_pnl":1,"expectancy":.1,"profit_factor":2,"trades":50,"max_drawdown_pct":1}
-            with patch.object(worker,"ROOT",root),patch.object(worker,"historical",return_value=(pd.DataFrame(),{})),patch.object(worker,"features",return_value=pd.DataFrame()),patch.object(worker,"simulate",return_value=result) as replay:
+            benchmarks={"cash":{"net_pnl":0,"max_drawdown_pct":0},"ema_cross":{"net_pnl":0,"max_drawdown_pct":0},"buy_hold_capped":{"net_pnl":0,"max_drawdown_pct":0}}
+            with patch.object(worker,"ROOT",root),patch.object(worker,"historical",return_value=(pd.DataFrame(),{})),patch.object(worker,"features",return_value=pd.DataFrame()),patch("engine.research_analysis.baselines",return_value=benchmarks),patch.object(worker,"simulate",return_value=result) as replay:
                 worker.research(reg,["BTCUSDT","ETHUSDT","SOLUSDT"])
                 key=reg.get("state","active_experiment")
                 plan=reg.get("experiment",key)
@@ -151,7 +152,9 @@ class ResearchQualityTests(unittest.TestCase):
                 pool[c.id]={"candidate":worker.asdict_candidate(c),"status":status,"account":s}
             reg.put("state","tournament",pool);reg.put("state","champion",incumbent.id)
             scores=[{"eligible":True,"net_pnl":1000,"max_drawdown_pct":1},{"eligible":True,"net_pnl":100,"max_drawdown_pct":1}]
-            with patch.object(worker,"public",return_value=raw),patch.object(worker,"forward_gate",side_effect=scores),patch.object(worker,"compare_forward",return_value={"replace":True,"mean_daily_excess_return":.001}):
+            def public(path,**params):
+                return {"bids":[[100,10000]],"asks":[[100.01,10000]]} if path=="depth" else raw
+            with patch.object(worker,"public",side_effect=public),patch.object(worker,"forward_gate",side_effect=scores),patch.object(worker,"compare_forward",return_value={"replace":True,"mean_daily_excess_return":.001}):
                 result=worker.tournament_cycle(reg,["BTCUSDT"])
             self.assertEqual(result["champion"],challenger.id)
             reg.db.close()

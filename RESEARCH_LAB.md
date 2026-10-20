@@ -1,5 +1,9 @@
 # Autonomous Research Lab
 
+Research v3 supersedes the regime, benchmark, forward execution and process details
+below. See [RESEARCH_V3.md](RESEARCH_V3.md) for the current behavior. Earlier results
+remain versioned in the registry and are not treated as observed paper executions.
+
 The Windows supervisor runs `research_lab_worker.py` continuously. It uses public
 market endpoints, a SQLite WAL registry in `data/lab`, and an exclusive process
 lock. The API `/api/research/status` and dashboard display progress.

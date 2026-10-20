@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-VERSION = "lab_v2"
+VERSION = "lab_v3"
 FAMILIES = ("ema_pullback", "channel_breakout", "rsi_reversion", "vwap_reclaim", "flow_breakout", "compression")
 
 
@@ -21,6 +21,7 @@ class Candidate:
     target_pct: float = 3.0
     hold_bars: int = 16
     volume_ratio: float = 1.2
+    regime_filter: str = "adaptive"
 
     @property
     def id(self):
@@ -30,7 +31,8 @@ class Candidate:
     def validate(self):
         if (self.family not in FAMILIES or not 0.5 <= self.stop_pct <= 3
                 or not 1 <= self.target_pct <= 8 or not 4 <= self.hold_bars <= 48
-                or not 1 <= self.volume_ratio <= 3 or type(self.hold_bars) is not int):
+                or not 1 <= self.volume_ratio <= 3 or type(self.hold_bars) is not int
+                or self.regime_filter not in {"adaptive","off"}):
             raise ValueError("Candidate outside approved research bounds")
         return self
 
@@ -101,6 +103,11 @@ def features(frame):
     f["width"] = (f.hi - f.lo) / c
     f["vwap"] = ((c * f.Volume).rolling(20).sum() / f.Volume.rolling(20).sum().replace(0, np.nan))
     f["flow"] = (((2*c-f.High-f.Low)/(f.High-f.Low).replace(0,np.nan))*f.Volume).rolling(20).sum()
+    tr=pd.concat([f.High-f.Low,(f.High-c.shift()).abs(),(f.Low-c.shift()).abs()],axis=1).max(axis=1)
+    f["atr_pct"]=tr.rolling(14).mean()/c*100
+    efficiency=(c-c.shift(20)).abs()/c.diff().abs().rolling(20).sum().replace(0,np.nan)
+    f["regime"]=np.select([f.atr_pct>=3,(f.ema21>f.ema50)&(efficiency>=.3),
+        (f.ema21<f.ema50)&(efficiency>=.3)], ["extreme","uptrend","downtrend"],default="range")
     return f
 
 
@@ -116,7 +123,11 @@ def signals(f, candidate):
         "flow_breakout": trend & (f.flow > 0) & (f.Close > f.hi) & (f.rvol >= 1.8),
         "compression": (f.width.shift() < 0.05) & (f.Close > f.hi) & (f.flow > 0),
     }
-    return (rules[candidate.family] & volume).fillna(False).to_numpy()
+    regime_allowed=pd.Series(True,index=f.index)
+    if candidate.regime_filter=="adaptive":
+        regime_allowed=(f.regime=="range") if candidate.family=="rsi_reversion" else (f.regime=="uptrend")
+        if candidate.family=="compression":regime_allowed=f.regime.isin(["range","uptrend"])
+    return (rules[candidate.family] & volume & regime_allowed).fillna(False).to_numpy()
 
 
 def account():
@@ -164,7 +175,10 @@ def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allo
                 and len(state["positions"]) < 5 and state["cash"] >= 50):
             price = float(bar["Open"])*(1+side_slip)
             pos = {"entry": price, "quantity": 50/(1+fee)/price, "size": 50,
-                   "entry_time": now_iso, "age": 0,"execution_slip":side_slip}
+                   "entry_time": now_iso, "age": 0,"execution_slip":side_slip,
+                   "reference_entry":float(bar["Open"]),"entry_regime":bar.get("decision_regime","unknown"),
+                   "entry_hour_utc":now.hour,"entry_volatility":bar.get("decision_volatility","unknown"),
+                   "entry_gap_pct":bar.get("entry_gap_pct"),"max_favorable_pct":0,"max_adverse_pct":0}
             state["positions"][symbol] = pos
             state["cash"] -= 50
             opened = True
@@ -172,6 +186,8 @@ def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allo
             pos["age"] += 1
             stop, target = pos["entry"]*(1-candidate.stop_pct/100), pos["entry"]*(1+candidate.target_pct/100)
             op, low, high, close = (float(bar[k]) for k in ("Open", "Low", "High", "Close"))
+            pos["max_favorable_pct"]=max(pos.get("max_favorable_pct",0),(high/pos["entry"]-1)*100)
+            pos["max_adverse_pct"]=min(pos.get("max_adverse_pct",0),(low/pos["entry"]-1)*100)
             price, reason = None, None
             if not opened and op <= stop:
                 price, reason = op, "gap_stop"
@@ -185,7 +201,10 @@ def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allo
                 proceeds = pos["quantity"]*price*(1-max(side_slip,pos.get("execution_slip",slip)))*(1-fee)
                 state["cash"] += proceeds
                 state["trades"].append({"symbol": symbol, "strategy": candidate.id, "entry_time": pos["entry_time"],
-                    "exit_time": now_iso, "pnl_usd": proceeds-pos["size"], "reason": reason})
+                    "exit_time": now_iso, "pnl_usd": proceeds-pos["size"], "reason": reason,
+                    "gross_pnl_usd":pos["size"]*(price/pos.get("reference_entry",pos["entry"])-1),
+                    **{key:pos.get(key) for key in ("entry_regime","entry_hour_utc","entry_volatility","entry_gap_pct","max_favorable_pct","max_adverse_pct")},
+                    "excursion_model":"candle_bounds_not_intrabar_path"})
                 state["realized_days"][day_key]=state["realized_days"].get(day_key,0)+proceeds-pos["size"]
                 del state["positions"][symbol]
             else:
@@ -217,10 +236,11 @@ def stats(state):
         "max_drawdown_pct": state["max_drawdown_pct"], "open_positions": len(state["positions"])}
 
 
-def simulate(frames, candidate, start, end, cost=1, delay_bars=0):
+def simulate(frames, candidate, start, end, cost=1, delay_bars=0, entry_masks=None, include_diagnostics=True):
     state = account()
-    prepared = {s: (f, signals(f,candidate), {t:i for i,t in enumerate(f.index)},
+    prepared = {s: (f, entry_masks[s] if entry_masks is not None else signals(f,candidate), {t:i for i,t in enumerate(f.index)},
                     f[["Open","High","Low","Close","Volume"]].to_numpy()) for s,f in frames.items()}
+    contexts={s:(f.regime.to_numpy(),f.atr_pct.to_numpy()) for s,f in frames.items()}
     timeline = sorted(set(t for f in frames.values() for t in f.index if start <= t < end))
     for t in timeline:
         bars, entries = {}, {}
@@ -232,9 +252,17 @@ def simulate(frames, candidate, start, end, cost=1, delay_bars=0):
                 continue
             bars[s]=dict(zip(("Open","High","Low","Close"),values[i][:4]))
             bars[s]["decision_quote_volume"]=values[i-1][3]*values[i-1][4]
+            bars[s]["decision_regime"]=str(contexts[s][0][i-1])
+            atr=float(contexts[s][1][i-1])
+            bars[s]["decision_volatility"]="high" if atr>=1.5 else "medium" if atr>=.5 else "low"
+            bars[s]["entry_gap_pct"]=(values[i][0]/values[i-1][3]-1)*100
             entries[s]=bool(mask[max(0,i-1-delay_bars)])
         advance(state,candidate,bars,entries,t,fee=0.001*cost,slip=0.0005*cost,spread=.0005*cost,track_curve=False)
-    return stats(state)
+    result=stats(state)
+    if include_diagnostics:
+        from engine.research_analysis import diagnose
+        result["diagnostics"]=diagnose(state["trades"])
+    return result
 
 
 def compare_forward(challenger, incumbent):
@@ -295,5 +323,6 @@ def forward_gate(state):
     result["profitable_symbols"] = sum(pnl>0 for pnl in symbol_pnl.values())
     result["eligible"] = (days >= 30 and result["trades"] >= 200 and result["profit_factor"] >= 1.3
         and result["max_drawdown_pct"] <= 5 and result["expectancy"] > 0 and result["net_pnl"] > 0
-        and result["profitable_symbols"] >= 3 and result["coverage"] >= .95)
+        and result["profitable_symbols"] >= 3 and result["coverage"] >= .95
+        and state.get("execution_model")=="observed_depth_v1" and state.get("valuation_complete",False))
     return result

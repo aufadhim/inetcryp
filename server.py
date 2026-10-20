@@ -49,12 +49,26 @@ def research_status():
         stamp = datetime.fromisoformat(result["at"])
         result["age_seconds"] = max(0,(datetime.now(timezone.utc)-stamp).total_seconds())
         result["stale"] = result["age_seconds"] > 1800
+        result["workers"]={}
+        for role,limit in (("monitor",120),("collector",900),("research",1800)):
+            worker_path=Path("data/lab")/(role+"_status.json")
+            if worker_path.exists():
+                worker=json.loads(worker_path.read_text(encoding="utf-8"))
+                age=max(0,(datetime.now(timezone.utc)-datetime.fromisoformat(worker["at"])).total_seconds())
+                worker["stale"]=age>limit
+                result["workers"][role]=worker
+            else:
+                result["workers"][role]={"status":"not_seen","stale":True}
         progress_path = Path("data/lab/progress.json")
-        if result.get("phase") == "research" and progress_path.exists():
+        if progress_path.exists():
             result["progress"] = json.loads(progress_path.read_text(encoding="utf-8"))
         latest_research=Path("data/lab/research-latest.json")
-        if "research" not in result and latest_research.exists():
+        if latest_research.exists():
             result["research"]=json.loads(latest_research.read_text(encoding="utf-8"))
+        legacy_diagnosis=Path("data/lab/legacy-loss-diagnosis.json")
+        if legacy_diagnosis.exists():result["legacy_diagnosis"]=json.loads(legacy_diagnosis.read_text(encoding="utf-8"))
+        diagnosis_path=Path("data/lab/loss-diagnosis.json")
+        if diagnosis_path.exists():result["diagnosis"]=json.loads(diagnosis_path.read_text(encoding="utf-8"))
         if Path("data/lab/registry.sqlite").exists():
             from engine.research_lab import Registry
             registry = Registry()

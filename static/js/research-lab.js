@@ -19,6 +19,7 @@
       const tournament = data.tournament || {};
       const lines = [
         `Worker: ${data.status}${data.stale ? ' · data kedaluwarsa' : ''} | ${data.phase || ''}`,
+        ...Object.entries(data.workers || {}).map(([name,w]) => `${name}: ${w.status}${w.stale ? ' · heartbeat basi' : ''}`),
         `Diperbarui: ${data.at || '-'} | ${data.symbols?.length || 0} koin`,
         `Eksperimen: ${research.status || 'berjalan / menunggu data'} · kandidat ${research.development?.length || 0}/12`,
         `Progress: ${data.progress?.phase || '-'} ${data.progress?.completed || 0}/${data.progress?.total || 12}`,
@@ -30,6 +31,9 @@
         `Champion paper: ${tournament.champion || 'belum ada kandidat lolos'}`,
         ...(tournament.accounts || []).map(a => `${a.family}: ${a.status} · equity $${a.equity.toFixed(2)} · ${a.trades} trades · PF ${a.profit_factor.toFixed(2)} · DD ${a.max_drawdown_pct.toFixed(2)}% · forward ${a.days.toFixed(1)} hari`),
         `Gemini researcher: ${data.adviser?.status || 'menunggu evaluasi'}`,
+        `Cost-flipped winners: ${data.diagnosis?.validation?.cost_flipped_winners ?? '-'} · kelompok di bawah 20 trade belum kuat`,
+        `Baseline validation: cash ${data.research?.baselines?.cash?.net_pnl?.toFixed(2) ?? '-'} | EMA ${data.research?.baselines?.ema_cross?.net_pnl?.toFixed(2) ?? '-'} | buy-hold capped ${data.research?.baselines?.buy_hold_capped?.net_pnl?.toFixed(2) ?? '-'}`,
+        'Forward paper: quote orderbook teramati; sinyal terlambat >90 detik ditolak. Riset, collector dan monitor berjalan terpisah.',
         'Lab memakai akun paper terpisah; porto lama tetap dipertahankan.'
       ];
       body.textContent = lines.join('\n');
