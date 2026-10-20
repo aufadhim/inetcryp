@@ -52,13 +52,19 @@ def research_status():
         progress_path = Path("data/lab/progress.json")
         if result.get("phase") == "research" and progress_path.exists():
             result["progress"] = json.loads(progress_path.read_text(encoding="utf-8"))
+        latest_research=Path("data/lab/research-latest.json")
+        if "research" not in result and latest_research.exists():
+            result["research"]=json.loads(latest_research.read_text(encoding="utf-8"))
         if Path("data/lab/registry.sqlite").exists():
             from engine.research_lab import Registry
             registry = Registry()
             try:
                 advice = registry.get("advice", datetime.now(timezone.utc).date().isoformat())
-                if advice:
+                if advice and advice.get("experiment")==result.get("research",{}).get("id"):
                     result["adviser"] = advice
+                source_health=registry.get("state","source_health")
+                if source_health:
+                    result["sources"]=source_health
             finally:
                 registry.db.close()
         return result

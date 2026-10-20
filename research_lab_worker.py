@@ -9,7 +9,8 @@ import pandas as pd
 import requests
 from engine.historical_data import historical
 from engine.research_lab import (VERSION, Candidate, Registry, account, advance, candidates,
-                                 features, forward_gate, research_gate, signals, simulate, stats)
+                                 features, forward_gate, research_gate, signals, simulate, stats,
+                                 compare_forward, holdout_watermark)
 
 ROOT = Path("data/lab")
 
@@ -29,8 +30,22 @@ def public(path, **params):
 
 def universe(reg):
     from engine.dynamic_universe import shortlist
-    rows = shortlist(public("exchangeInfo"), public("ticker/24hr"), time.time()*1000)
-    symbols = list(dict.fromkeys(["BTCUSDT", "ETHUSDT", "SOLUSDT"]+[r["symbol"] for r in rows]))[:8]
+    info,tickers=public("exchangeInfo"),public("ticker/24hr")
+    rows = shortlist(info,tickers,time.time()*1000)
+    from engine.dynamic_universe import STABLES
+    eligible={r["symbol"] for r in info.get("symbols",[]) if r.get("status")=="TRADING" and r.get("quoteAsset")=="USDT"
+              and r.get("isSpotTradingAllowed") and r.get("baseAsset") not in STABLES
+              and not r.get("baseAsset","").endswith(("UP","DOWN","BULL","BEAR"))}
+    liquid=sorted([r for r in tickers if r.get("symbol") in eligible and float(r.get("quoteVolume",0))>=5_000_000
+                   and float(r.get("count",0))>=5000],key=lambda r:-float(r["quoteVolume"]))
+    symbols = list(dict.fromkeys(["BTCUSDT", "ETHUSDT", "SOLUSDT"]+[r["symbol"] for r in rows[:2]]+[r["symbol"] for r in liquid]))[:8]
+    today=datetime.now(timezone.utc).date().isoformat()
+    catalog=reg.get("state","exchange_catalog",{})
+    if catalog.get("date")!=today:
+        now=datetime.now(timezone.utc).isoformat()
+        snapshot={"date":today,"observed_at":now,"symbols":[{k:r.get(k) for k in ("symbol","status","baseAsset","quoteAsset")} for r in info.get("symbols",[])]}
+        reg.event("exchange_catalog_observed",snapshot)
+        reg.put("state","exchange_catalog",snapshot)
     reg.event("universe_observed", {"symbols": symbols, "selection_bias": "current listing/momentum; historical survivors only"})
     return symbols
 
@@ -41,20 +56,29 @@ def discovery(reg):
     r.raise_for_status()
     profiles = r.json()
     output = []
-    for profile in profiles[:5]:
+    for profile_index,profile in enumerate(profiles[:5]):
         chain, address = profile.get("chainId"), profile.get("tokenAddress")
         if not chain or not address:
             continue
+        security=reg.get("token_security",chain+":"+address)
+        if profile_index<2 and (not security or (datetime.now(timezone.utc)-datetime.fromisoformat(security["observed_at"])).total_seconds()>21600):
+            from engine.research_data import token_security
+            security=token_security(chain,address)
+            security["observed_at"]=datetime.now(timezone.utc).isoformat()
+            reg.put("token_security",chain+":"+address,security)
+            reg.event("token_security_observation",security)
         response = requests.get(f"https://api.dexscreener.com/token-pairs/v1/{chain}/{address}", timeout=15)
         response.raise_for_status()
         for pair in response.json()[:3]:
+            from engine.research_data import dex_risk
             output.append({"chain": chain, "token_address": address, "pair": pair.get("pairAddress"),
                 "liquidity": (pair.get("liquidity") or {}).get("usd"), "volume": pair.get("volume"),
                 "change": pair.get("priceChange"), "price_usd": pair.get("priceUsd"),
+                "risk":dex_risk(pair),"security":security or {"status":"not_checked"},
                 "policy": "observe_only_unverified_sellability_and_holders"})
     reg.event("dex_observation", {"at": datetime.now(timezone.utc).isoformat(), "pairs": output})
     atomic(ROOT/"discovery.json", {"as_of": datetime.now(timezone.utc).isoformat(), "pairs": output,
-        "fundamentals": "unavailable: no point-in-time tokenomics/unlock/holder archive yet",
+        "fundamentals": "CoinGecko metadata archived separately; unlock and holder history unavailable",
         "fluxscout": "unverified_api", "dawn_trade": "unverified_data_api"})
 
 
@@ -62,21 +86,44 @@ def archive_orderbooks(reg, symbols):
     from engine.multi_exchange import CrossExchangeMarket
     market = CrossExchangeMarket()
     for symbol in symbols[:3]:
-        reg.event("cross_exchange_observation", {"at":datetime.now(timezone.utc).isoformat(),
-            "snapshot":market.snapshot(symbol),"historical_use":"forward_archive_only"})
+        snapshot=market.snapshot(symbol)
+        reg.event("cross_exchange_observation", {"observed_at":datetime.now(timezone.utc).isoformat(),
+            "snapshot":snapshot,"historical_use":"forward_archive_only"})
 
 
 def research(reg, symbols):
     # Freeze one experiment per weekly epoch. The same holdout is never used
     # to tune another search; future versions need a newer holdout period.
-    end = pd.Timestamp.now(tz="UTC").floor("D")
-    end -= pd.Timedelta(days=end.dayofweek)
+    now=pd.Timestamp.now(tz="UTC")
+    end = now.floor("D")
+    end += pd.Timedelta(days=7-end.dayofweek)
     key = VERSION+":"+end.isoformat()
+    active=reg.get("state","active_experiment")
+    active_plan=reg.get("experiment",active) if active else None
+    if active_plan and active_plan.get("status") not in {"completed","insufficient_data","rejected_validation"}:
+        key=active
+        end=pd.Timestamp(active_plan["end"])
     previous = reg.get("experiment",key)
-    if previous and previous.get("status") in {"completed","insufficient_data"}:
+    if previous and previous.get("status") in {"completed","insufficient_data","rejected_validation"}:
+        return
+    if previous and previous.get("development") and now<end:
+        failed=[]
+        for name in ("validation","double_cost","latency_stress"):
+            result=previous.get(name,{})
+            if (result.get("net_pnl",0)<=0 or result.get("expectancy",0)<=0
+                    or result.get("profit_factor",0)<1.3 or result.get("trades",0)<30
+                    or result.get("max_drawdown_pct",100)>5):
+                failed.append(name+": failed before prospective holdout")
+        if failed:
+            previous.update(status="rejected_validation",gate={"eligible":False,"reasons":failed})
+            reg.put("experiment",key,previous)
+            reg.event("research_decision",{"experiment":key,"decision":"rejected_validation","reasons":failed})
+            atomic(ROOT/"research-latest.json",previous)
         return
     start = end-pd.Timedelta(days=180)
     split_a, split_b = start+pd.Timedelta(days=108), start+pd.Timedelta(days=144)
+    used=holdout_watermark(reg)
+    holdout_start=max(split_b,used if used is not None else split_b,now.ceil("D")) if not previous else pd.Timestamp(previous["holdout_start"])
     if previous:
         symbols = previous["universe"]
     pool = candidates()
@@ -88,15 +135,25 @@ def research(reg, symbols):
     plan = {"id":key,"start":str(start),"end":str(end),"candidates":[asdict_candidate(c) for c in pool],
         "max_trials":12,"selection":"development_only","status":"running","datasets":{},
         "universe":symbols,"warning":"Current universe survivorship bias; historical scores alone cannot promote champion"}
+    plan.update(holdout_start=holdout_start.isoformat(),frozen_at=(previous or {}).get("frozen_at",now.isoformat()),
+        execution_model="spread_5bps_plus_slippage_5bps_plus_volume_impact",holdout_policy="nonoverlap_after_candidate_freeze")
+    if now<end:
+        plan.update(status="awaiting_fresh_holdout",gate={"eligible":False,"reasons":["Frozen candidates wait for new, nonoverlapping holdout candles"]})
+        reg.put("experiment",key,plan)
+        reg.put("state","active_experiment",key)
+        atomic(ROOT/"research-latest.json",plan)
     reg.put("experiment",key,plan)
     frames = {}
+    atomic(ROOT/"progress.json",{"phase":"datasets","completed":0,"total":len(symbols),"experiment":key})
     for symbol in symbols:
         try:
-            frame, provenance = historical(symbol,start,end,cache_dir="data/lab/cache")
+            fetch_end=end if now>=end else pd.Timestamp(plan["frozen_at"]).floor("15min")
+            frame, provenance = historical(symbol,start,fetch_end,cache_dir="data/lab/cache")
             frames[symbol] = features(frame)
             plan["datasets"][symbol] = provenance
         except Exception as exc:
             reg.event("dataset_failed", {"symbol":symbol,"error_type":type(exc).__name__})
+        atomic(ROOT/"progress.json",{"phase":"datasets","completed":len(frames),"total":len(symbols),"experiment":key})
     if len(frames) < 3:
         plan.update(status="insufficient_data")
         reg.put("experiment",key,plan)
@@ -112,18 +169,41 @@ def research(reg, symbols):
     c = Candidate(**selected["candidate"]["parameters"])
     validation = simulate(frames,c,split_a,split_b)
     stress = simulate(frames,c,split_a,split_b,cost=2)
-    # Only the development winner can consume final holdout.
-    holdout = simulate(frames,c,split_b,end)
+    latency = simulate(frames,c,split_a,split_b,cost=2,delay_bars=1)
     folds = [simulate(frames,c,split_a+pd.Timedelta(days=12*i),split_a+pd.Timedelta(days=12*(i+1))) for i in range(3)]
-    cross = [simulate({s:f},c,split_b,end) for s,f in frames.items()]
+    if now<end:
+        failed=[]
+        for name,result in (("validation",validation),("double_cost",stress),("latency_stress",latency)):
+            if (result["net_pnl"]<=0 or result["expectancy"]<=0 or result["profit_factor"]<1.3
+                    or result["trades"]<30 or result["max_drawdown_pct"]>5):
+                failed.append(name+": failed before prospective holdout")
+        plan.update(status="awaiting_fresh_holdout",development=development,selected=asdict_candidate(c),validation=validation,
+                    double_cost=stress,latency_stress=latency,walk_forward=folds,
+                    gate={"eligible":False,"reasons":["Development and validation complete; prospective holdout still collecting"]})
+        if failed:
+            plan.update(status="rejected_validation",gate={"eligible":False,"reasons":failed})
+            reg.event("research_decision",{"experiment":key,"decision":"rejected_validation","reasons":failed})
+        reg.put("experiment",key,plan)
+        atomic(ROOT/"research-latest.json",plan)
+        return
+    # Only the development winner can consume final holdout.
+    holdout = simulate(frames,c,holdout_start,end)
+    cross = [simulate({s:f},c,holdout_start,end) for s,f in frames.items()]
     gate = research_gate(validation,stress,holdout,folds,cross)
+    if latency["net_pnl"]<=0 or latency["expectancy"]<=0:
+        gate["reasons"].append("latency_stress: negative edge after one-bar delay")
+        gate["eligible"]=False
     plan.update(status="completed",development=development,selected=asdict_candidate(c),validation=validation,
-                double_cost=stress,holdout=holdout,walk_forward=folds,cross_coin=cross,gate=gate)
+                double_cost=stress,latency_stress=latency,holdout=holdout,walk_forward=folds,cross_coin=cross,gate=gate)
     reg.put("experiment",key,plan)
     reg.event("research_decision", {"experiment":key,"candidate":c.id,**gate})
     atomic(ROOT/"research-latest.json",plan)
     if gate["eligible"]:
         tournament = reg.get("state","tournament",{})
+        for old_id,old in list(tournament.items()):
+            if old["status"].startswith("paused") and not old["account"]["positions"]:
+                reg.put("retired_account",old_id,old)
+                del tournament[old_id]
         if c.id not in tournament and len(tournament)<3:
             tournament[c.id] = {"candidate":asdict_candidate(c),"experiment":key,"account":account(),"status":"challenger"}
             reg.put("state","tournament",tournament)
@@ -151,6 +231,8 @@ def tournament_cycle(reg,symbols):
         prepared[symbol] = features(frame)
     for cid, entry in tournament.items():
         c = Candidate(**entry["candidate"]["parameters"]).validate()
+        if c.id!=cid:
+            entry["status"]="paused_execution_model_changed"
         state = entry["account"]
         pending = {}
         for symbol, f in prepared.items():
@@ -168,6 +250,8 @@ def tournament_cycle(reg,symbols):
             for i in indices:
                 bars,entries = pending.setdefault(f.index[i],({},{}))
                 bars[symbol],entries[symbol] = f.iloc[i],bool(mask[i-1])
+                bars[symbol]=bars[symbol].to_dict()
+                bars[symbol]["decision_quote_volume"]=float(f.iloc[i-1].Close*f.iloc[i-1].Volume)
         for stamp,(bars,entries) in sorted(pending.items()):
             advance(state,c,bars,entries,stamp,allow_entry=entry["status"] in {"challenger","champion"})
         performance = forward_gate(state)
@@ -181,15 +265,28 @@ def tournament_cycle(reg,symbols):
         champion=None
         reg.put("state","champion",None)
     if eligible:
-        best = max(eligible,key=lambda r:r["net_pnl"])
-        current = next((r for r in rows if r["id"]==champion),None)
-        if best["id"] != champion and (not current or best["net_pnl"]>current["net_pnl"]+5):
+        best=None
+        if champion is None:
+            best=max(eligible,key=lambda r:r["net_pnl"])
+        else:
+            replacements=[]
+            for row in eligible:
+                if row["id"]==champion:continue
+                comparison=compare_forward(tournament[row["id"]]["account"],tournament[champion]["account"])
+                reg.event("champion_comparison",{"candidate":row["id"],"incumbent":champion,**comparison})
+                if comparison["replace"]:
+                    replacements.append((comparison["mean_daily_excess_return"],row))
+            if replacements:
+                best=max(replacements,key=lambda item:item[0])[1]
+        if best is not None and best["id"] != champion:
             if champion in tournament:
                 tournament[champion]["status"]="challenger"
             champion = best["id"]
             tournament[champion]["status"]="champion"
             reg.put("state","champion",champion)
             reg.event("paper_champion_changed",{"candidate":champion,"live_trading":False})
+    for row in rows:
+        row["status"]=tournament[row["id"]]["status"]
     reg.put("state","tournament",tournament)
     return {"champion":champion,"accounts":rows,"live_trading":False,
             "paper_promotion":"30 days, 200 trades, PF >=1.3, positive expectancy, drawdown <=5%"}
@@ -201,6 +298,8 @@ def adviser(reg):
         return {"status":"waiting_for_first_research_result"}
     today = datetime.now(timezone.utc).date().isoformat()
     research_result = json.loads((ROOT/"research-latest.json").read_text(encoding="utf-8"))
+    if research_result.get("status") not in {None,"completed","rejected_validation"}:
+        return {"status":"waiting_for_completed_frozen_experiment"}
     previous = reg.get("advice",today)
     if (previous and previous.get("experiment")==research_result.get("id")
             and (previous.get("status")=="bounded_proposals_for_next_epoch" or previous.get("attempts",0)>=2)):
@@ -261,6 +360,8 @@ def main(once=False):
         try:
             atomic(ROOT/"status.json",{"status":"running","phase":"research","at":datetime.now(timezone.utc).isoformat()})
             symbols = universe(reg)
+            from engine.research_data import collect_sources
+            sources=collect_sources(reg,symbols)
             research(reg,symbols)
             tournament = tournament_cycle(reg,symbols)
             try:
@@ -274,6 +375,7 @@ def main(once=False):
             advice = adviser(reg)
             atomic(ROOT/"status.json",{"status":"sleeping","at":datetime.now(timezone.utc).isoformat(),
                 "version":VERSION,"symbols":symbols,"tournament":tournament,"adviser":advice,
+                "sources":sources,
                 "research":json.loads((ROOT/"research-latest.json").read_text(encoding="utf-8")) if (ROOT/"research-latest.json").exists() else {"status":"pending_or_insufficient_data"}})
         except Exception as exc:
             atomic(ROOT/"status.json",{"status":"error","at":datetime.now(timezone.utc).isoformat(),"error_type":type(exc).__name__})

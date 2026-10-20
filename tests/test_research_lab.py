@@ -11,7 +11,7 @@ from engine.research_lab import Candidate, Registry, account, advance, candidate
 class LabTests(unittest.TestCase):
     def frame(self):
         close = 100 + np.sin(np.arange(300)/5)*2 + np.arange(300)*.02
-        return pd.DataFrame({"Open":close,"Close":close,"High":close+1,"Low":close-1,"Volume":100},
+        return pd.DataFrame({"Open":close,"Close":close,"High":close+1,"Low":close-1,"Volume":100000},
             index=pd.date_range("2025-01-01",periods=300,freq="15min",tz="UTC"))
 
     def test_future_cannot_change_previous_signals(self):
@@ -87,7 +87,9 @@ class LabTests(unittest.TestCase):
             result=simulate({"X":f},c,f.index[100],f.index[-1]+pd.Timedelta(minutes=15))
         s=account()
         for i in range(100,len(f)):
-            advance(s,c,{"X":f.iloc[i]},{"X":bool(mask[i-1])},f.index[i])
+            bar=f.iloc[i].to_dict()
+            bar["decision_quote_volume"]=float(f.iloc[i-1].Close*f.iloc[i-1].Volume)
+            advance(s,c,{"X":bar},{"X":bool(mask[i-1])},f.index[i])
         self.assertGreater(len(s["trades"]),0)
         self.assertAlmostEqual(result["equity"],s["equity"],places=3)
 

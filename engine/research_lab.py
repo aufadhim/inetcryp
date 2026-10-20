@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-VERSION = "lab_v1"
+VERSION = "lab_v2"
 FAMILIES = ("ema_pullback", "channel_breakout", "rsi_reversion", "vwap_reclaim", "flow_breakout", "compression")
 
 
@@ -48,6 +48,7 @@ class Registry:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, payload TEXT, PRIMARY KEY(kind,id))")
         self.db.execute("CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, at TEXT, event TEXT, payload TEXT)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS observation_points (source TEXT, symbol TEXT, event_at TEXT, received_at TEXT, payload TEXT, PRIMARY KEY(source,symbol,event_at))")
         self.db.commit()
 
     def get(self, kind, key, default=None):
@@ -63,10 +64,25 @@ class Registry:
                         (datetime.now(timezone.utc).isoformat(), event, json.dumps(payload, allow_nan=False)))
         self.db.commit()
 
+    def series(self, source, symbol, rows, time_field):
+        received=datetime.now(timezone.utc).isoformat()
+        before=self.db.total_changes
+        for row in rows:
+            try:
+                at=datetime.fromtimestamp(float(row[time_field])/1000,timezone.utc).isoformat()
+                self.db.execute("INSERT OR IGNORE INTO observation_points VALUES (?,?,?,?,?)",
+                    (source,symbol,at,received,json.dumps(row,allow_nan=False)))
+            except (KeyError,TypeError,ValueError,OverflowError):
+                continue
+        self.db.commit()
+        return self.db.total_changes-before
+
 
 def features(frame):
     if not isinstance(frame.index, pd.DatetimeIndex) or not frame.index.is_monotonic_increasing or frame.index.has_duplicates:
         raise ValueError("Ascending unique timestamps required")
+    if frame.index.tz is None or (len(frame)>1 and not (frame.index.to_series().diff().iloc[1:]==pd.Timedelta(minutes=15)).all()):
+        raise ValueError("Complete timezone-aware 15-minute candles required")
     cols = ["Open", "High", "Low", "Close", "Volume"]
     if not np.isfinite(frame[cols].to_numpy()).all() or (frame[cols[:4]] <= 0).any().any() or (frame.Volume < 0).any():
         raise ValueError("Invalid OHLCV")
@@ -105,10 +121,10 @@ def signals(f, candidate):
 
 def account():
     return {"cash": 1000.0, "positions": {}, "trades": [], "peak": 1000.0, "max_drawdown_pct": 0.0,
-            "equity": 1000.0, "seen": {}, "first_at": None, "last_at": None,"observed_steps":0}
+            "equity": 1000.0, "seen": {}, "first_at": None, "last_at": None,"observed_steps":0,"equity_curve":[],"realized_days":{}}
 
 
-def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allow_entry=True):
+def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allow_entry=True, spread=0.0005, track_curve=True):
     """Same execution for historical and forward paper: prior close signal, next open fill.
 
     Completed bars only; adverse opening gaps honored; stop wins ambiguous bars.
@@ -116,24 +132,39 @@ def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allo
     """
     candidate.validate()
     now = pd.Timestamp(stamp)
-    if not bars or all(state["seen"].get(s)==now.isoformat() for s in bars):
+    if now.tzinfo is None:
+        raise ValueError("Timezone required")
+    now=now.tz_convert("UTC")
+    now_iso=now.isoformat()
+    if not bars or all(state["seen"].get(s,"")>=now_iso for s in bars):
         return state
-    if state["last_at"] != now.isoformat():
+    if state["last_at"] != now_iso:
         state["observed_steps"] = state.get("observed_steps",0)+1
-    state["first_at"] = state["first_at"] or now.isoformat()
+    state["first_at"] = state["first_at"] or now_iso
+    if "realized_days" not in state:
+        state["realized_days"]={}
+        for trade in state["trades"]:
+            day=trade["exit_time"][:10]
+            state["realized_days"][day]=state["realized_days"].get(day,0)+trade["pnl_usd"]
+    day_key=now_iso[:10]
     for symbol in sorted(bars):
         bar = bars[symbol]
-        if state["seen"].get(symbol) == now.isoformat():
+        seen=state["seen"].get(symbol)
+        if seen and seen>=now_iso:
             continue
-        state["seen"][symbol] = now.isoformat()
+        state["seen"][symbol] = now_iso
         pos = state["positions"].get(symbol)
         opened = False
-        daily = sum(t["pnl_usd"] for t in state["trades"] if t["exit_time"][:10] == now.isoformat()[:10])
-        if (not pos and entries.get(symbol) and allow_entry and daily > -10
+        quote_volume=bar.get("decision_quote_volume")
+        liquidity_ok=quote_volume is None or (math.isfinite(float(quote_volume)) and float(quote_volume)>0 and 50/float(quote_volume)<=0.001)
+        impact=0 if quote_volume is None or not liquidity_ok else 0.1*50/float(quote_volume)
+        side_slip=slip+spread/2+impact
+        daily = state["realized_days"].get(day_key,0)
+        if (not pos and entries.get(symbol) and allow_entry and daily > -10 and liquidity_ok
                 and len(state["positions"]) < 5 and state["cash"] >= 50):
-            price = float(bar["Open"])*(1+slip)
+            price = float(bar["Open"])*(1+side_slip)
             pos = {"entry": price, "quantity": 50/(1+fee)/price, "size": 50,
-                   "entry_time": now.isoformat(), "age": 0}
+                   "entry_time": now_iso, "age": 0,"execution_slip":side_slip}
             state["positions"][symbol] = pos
             state["cash"] -= 50
             opened = True
@@ -151,18 +182,26 @@ def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allo
             elif pos["age"] >= candidate.hold_bars:
                 price, reason = close, "time_stop"
             if price is not None:
-                proceeds = pos["quantity"]*price*(1-slip)*(1-fee)
+                proceeds = pos["quantity"]*price*(1-max(side_slip,pos.get("execution_slip",slip)))*(1-fee)
                 state["cash"] += proceeds
                 state["trades"].append({"symbol": symbol, "strategy": candidate.id, "entry_time": pos["entry_time"],
-                    "exit_time": now.isoformat(), "pnl_usd": proceeds-pos["size"], "reason": reason})
+                    "exit_time": now_iso, "pnl_usd": proceeds-pos["size"], "reason": reason})
+                state["realized_days"][day_key]=state["realized_days"].get(day_key,0)+proceeds-pos["size"]
                 del state["positions"][symbol]
             else:
                 pos["mark"] = close
-    equity = state["cash"] + sum(p["quantity"]*p.get("mark",p["entry"])*(1-slip)*(1-fee) for p in state["positions"].values())
+    equity = state["cash"] + sum(p["quantity"]*p.get("mark",p["entry"])*(1-max(slip,p.get("execution_slip",slip)))*(1-fee) for p in state["positions"].values())
     state["equity"] = equity
     state["peak"] = max(state["peak"], equity)
     state["max_drawdown_pct"] = max(state["max_drawdown_pct"], (state["peak"]-equity)/state["peak"]*100)
-    state["last_at"] = now.isoformat()
+    state["last_at"] = now_iso
+    if track_curve:
+        curve=state.setdefault("equity_curve",[])
+        point={"at":now_iso,"equity":equity}
+        if curve and curve[-1]["at"]==point["at"]:
+            curve[-1]=point
+        else:
+            curve.append(point)
     return state
 
 
@@ -178,10 +217,10 @@ def stats(state):
         "max_drawdown_pct": state["max_drawdown_pct"], "open_positions": len(state["positions"])}
 
 
-def simulate(frames, candidate, start, end, cost=1):
+def simulate(frames, candidate, start, end, cost=1, delay_bars=0):
     state = account()
     prepared = {s: (f, signals(f,candidate), {t:i for i,t in enumerate(f.index)},
-                    f[["Open","High","Low","Close"]].to_numpy()) for s,f in frames.items()}
+                    f[["Open","High","Low","Close","Volume"]].to_numpy()) for s,f in frames.items()}
     timeline = sorted(set(t for f in frames.values() for t in f.index if start <= t < end))
     for t in timeline:
         bars, entries = {}, {}
@@ -191,9 +230,43 @@ def simulate(frames, candidate, start, end, cost=1):
             i = locations[t]
             if i < 100:
                 continue
-            bars[s], entries[s] = dict(zip(("Open","High","Low","Close"),values[i])), bool(mask[i-1])
-        advance(state,candidate,bars,entries,t,fee=0.001*cost,slip=0.0005*cost)
+            bars[s]=dict(zip(("Open","High","Low","Close"),values[i][:4]))
+            bars[s]["decision_quote_volume"]=values[i-1][3]*values[i-1][4]
+            entries[s]=bool(mask[max(0,i-1-delay_bars)])
+        advance(state,candidate,bars,entries,t,fee=0.001*cost,slip=0.0005*cost,spread=.0005*cost,track_curve=False)
     return stats(state)
+
+
+def compare_forward(challenger, incumbent):
+    """Compare marked daily returns over the same actually observed dates."""
+    def daily(state):
+        curve=state.get("equity_curve",[])
+        if not curve: return pd.Series(dtype=float)
+        s=pd.Series([p["equity"] for p in curve],index=pd.to_datetime([p["at"] for p in curve],utc=True))
+        return s.resample("1D").last().pct_change(fill_method=None).dropna()
+    paired=pd.concat([daily(challenger).rename("challenger"),daily(incumbent).rename("incumbent")],axis=1,sort=True).dropna()
+    if len(paired)<30:
+        return {"replace":False,"common_days":len(paired),"reason":"need_30_common_observed_days"}
+    difference=(paired.challenger-paired.incumbent).to_numpy()
+    # Bootstrap 5-day blocks, preserving short-range serial dependence.
+    rng=np.random.default_rng(42)
+    blocks=[difference[i:i+5] for i in range(0,len(difference)-4)]
+    means=[]
+    for _ in range(1000):
+        sampled=np.concatenate([blocks[i] for i in rng.integers(0,len(blocks),size=math.ceil(len(difference)/5))])[:len(difference)]
+        means.append(float(sampled.mean()))
+    lower=float(np.quantile(means,.025))
+    return {"replace":lower>0,"common_days":len(paired),"lower_daily_excess_return":lower,
+            "mean_daily_excess_return":float(difference.mean()),"method":"five_day_block_bootstrap_1000"}
+
+
+def holdout_watermark(reg):
+    dates=[]
+    for row in reg.db.execute("SELECT payload FROM records WHERE kind='experiment'"):
+        data=json.loads(row[0])
+        if data.get("status")=="completed" and data.get("holdout") is not None:
+            dates.append(pd.Timestamp(data["end"]))
+    return max(dates) if dates else None
 
 
 def research_gate(validation, stress, holdout, folds, symbol_results):
