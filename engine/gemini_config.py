@@ -18,7 +18,7 @@ TRANSIENT = {408, 429, 500, 502, 503, 504}
 def _record(result):
     path = Path("data/gemini_health.json")
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(".tmp")
+    temp = path.with_name(path.name+"."+uuid.uuid4().hex+".tmp")
     temp.write_text(json.dumps(result, indent=2), encoding="utf-8")
     temp.replace(path)
 

@@ -36,6 +36,35 @@ def universe_status():
     from engine.dynamic_universe import latest_snapshot
     return latest_snapshot()
 
+
+@app.get("/api/research/status")
+def research_status():
+    import json
+    from pathlib import Path
+    path = Path("data/lab/status.json")
+    if not path.exists():
+        return {"status":"not_started"}
+    try:
+        result = json.loads(path.read_text(encoding="utf-8"))
+        stamp = datetime.fromisoformat(result["at"])
+        result["age_seconds"] = max(0,(datetime.now(timezone.utc)-stamp).total_seconds())
+        result["stale"] = result["age_seconds"] > 1800
+        progress_path = Path("data/lab/progress.json")
+        if result.get("phase") == "research" and progress_path.exists():
+            result["progress"] = json.loads(progress_path.read_text(encoding="utf-8"))
+        if Path("data/lab/registry.sqlite").exists():
+            from engine.research_lab import Registry
+            registry = Registry()
+            try:
+                advice = registry.get("advice", datetime.now(timezone.utc).date().isoformat())
+                if advice:
+                    result["adviser"] = advice
+            finally:
+                registry.db.close()
+        return result
+    except (OSError,ValueError,KeyError):
+        return {"status":"unreadable"}
+
 ALLOWED_ORIGINS = [x.strip() for x in os.getenv("ALLOWED_ORIGINS", "http://127.0.0.1:8090,http://localhost:8090").split(",") if x.strip()]
 ACCESS_PASSWORD = os.getenv("ACCESS_PASSWORD", "").strip()
 ALLOWED_TIMEFRAMES = {"1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"}

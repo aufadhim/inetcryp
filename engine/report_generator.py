@@ -54,6 +54,17 @@ def generate_report(summary: Dict[str, Any], signals: List[Dict[str, Any]] | Non
     ret = _num(summary.get("net_return_pct"))
     entries_text = "ENTRY AKTIF" if control["entries"] else "RESEARCH QUARANTINE"
     status_class = "live" if control["entries"] else "quarantine"
+    lab_text = "Research Lab menyiapkan eksperimen pertama."
+    try:
+        with open("data/lab/status.json", encoding="utf-8") as handle:
+            lab = json.load(handle)
+        research = lab.get("research", {})
+        tournament = lab.get("tournament", {})
+        lab_text = (f"Worker: {lab.get('status')} · eksperimen: {research.get('status', 'berjalan')} · "
+                    f"lolos: {research.get('gate', {}).get('eligible', 'menunggu')} · "
+                    f"champion paper: {tournament.get('champion') or 'belum ada'}")
+    except (OSError, ValueError, TypeError):
+        pass
     return f"""<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)}</title><style>
@@ -76,6 +87,7 @@ def generate_report(summary: Dict[str, Any], signals: List[Dict[str, Any]] | Non
 <h2>Open Positions</h2><div class="tablewrap"><table><thead><tr><th>Pair</th><th>Entry</th><th>Mark</th><th>Net PnL</th><th>Strategy</th></tr></thead><tbody>{position_rows}</tbody></table></div>
 <h2>Signal Radar</h2><div class="tablewrap"><table><thead><tr><th>Pair</th><th>Status</th><th>Score</th><th>Confidence</th><th>Evidence</th></tr></thead><tbody>{signal_rows}</tbody></table></div>
 <h2>10 Closed Trades Terbaru</h2><div class="tablewrap"><table><thead><tr><th>Exit (UTC)</th><th>Pair</th><th>Strategy</th><th>PnL USDT</th><th>PnL</th><th>Exit reason</th></tr></thead><tbody>{trade_rows}</tbody></table></div>
+<h2>Autonomous Research Lab</h2><div class="panel">{html.escape(lab_text)}<p class="muted">Akun eksperimen terpisah. Pantau rincian pada panel Research Lab atau perintah Telegram /research.</p></div>
 <footer>Data berasal dari paper journal dan market screener INETCRYP. Orderbook bersifat snapshot dan dapat berubah cepat. Tidak ada transaksi live yang dilakukan oleh report ini. Jangan menganggap skor sebagai kepastian profit.</footer>
 </div></body></html>"""
 

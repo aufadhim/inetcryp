@@ -41,6 +41,18 @@ def main() -> None:
                 selection = {"symbols": [], "as_of": None}
             trader.universe_as_of = selection["as_of"]
             result = trader.run_eval_cycle(symbols=selection["symbols"], timeframe=os.getenv("PAPER_TIMEFRAME", "15m"))
+            # Reuse the normal application's adviser environment; research
+            # worker itself only accesses public market data.
+            try:
+                from engine.research_lab import Registry
+                from research_lab_worker import adviser
+                registry = Registry()
+                try:
+                    adviser(registry)
+                finally:
+                    registry.db.close()
+            except Exception:
+                pass
             advice = advise_after_losses(result["summary"])
             if advice and os.getenv("TELEGRAM_ALERT_ENABLED", "false").lower() == "true":
                 send_telegram_alert(f"🧠 <b>Gemini Strategy Adviser</b>\n{html.escape(advice[:3500])}")

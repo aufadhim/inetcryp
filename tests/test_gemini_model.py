@@ -5,6 +5,11 @@ from engine.ai_analyst import analyze_with_gemini
 
 
 class GeminiModelTests(unittest.TestCase):
+    def setUp(self):
+        recorder = patch("engine.gemini_config._record")
+        recorder.start()
+        self.addCleanup(recorder.stop)
+
     def test_both_paths_use_requested_model_and_header(self):
         response = Mock(status_code=200)
         response.json.return_value = {"candidates": [{"content": {"parts": [{"text": "internal", "thought": True}, {"text": "OK"}]}}]}

@@ -177,6 +177,24 @@ class TelegramWorker:
                 lines.append(f"• <b>{html.escape(str(token.get('symbol') or '?'))}</b> {token.get('score',0):.0f}/100 | {html.escape(str(narrative.get('name') or narrative.get('title')))} | LP ${token.get('liquidity_usd',0):,.0f}")
             lines.append("\nAfiliasi proyek belum terverifikasi. Alert only; jangan auto-buy.")
             self.send(chat_id, "\n".join(lines if len(lines)>2 else lines+["Belum ada kecocokan yang lolos."]), keyboard=True)
+        elif command in {"/research", "/learning", "/lab"}:
+            try:
+                with open("data/lab/status.json", encoding="utf-8") as handle:
+                    lab = json.load(handle)
+                research = lab.get("research", {})
+                tournament = lab.get("tournament", {})
+                lines = ["🧪 <b>INETCRYP Research Lab</b>",
+                    "Worker: "+html.escape(str(lab.get("status"))),
+                    "Waktu: "+html.escape(str(lab.get("at"))),
+                    "Eksperimen: "+html.escape(str(research.get("status", "berjalan"))),
+                    "Lolos: "+str(research.get("gate", {}).get("eligible", "menunggu")),
+                    "Champion paper: "+html.escape(str(tournament.get("champion") or "belum ada"))]
+                for row in tournament.get("accounts", []):
+                    lines.append(html.escape(f"{row['family']}: ${row['equity']:.2f}, {row['trades']} trades, PF {row['profit_factor']:.2f}"))
+                lines.extend(html.escape(reason) for reason in research.get("gate", {}).get("reasons", []))
+                self.send(chat_id, "\n".join(lines), keyboard=True)
+            except (OSError, ValueError, KeyError):
+                self.send(chat_id, "Research Lab sedang menyiapkan data awal.", keyboard=True)
         elif command == "/report" or normalized in {"📊 report", "report"}:
             url = get_report_url()
             self.send(chat_id, f"📊 <b>Report terbaru</b>\n<a href=\"{html.escape(url, quote=True)}\">Buka HTML report</a>", keyboard=True)
