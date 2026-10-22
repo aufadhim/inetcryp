@@ -44,11 +44,11 @@ def benchmark_gate(result, baselines):
         "risk_basis":"Same $1,000 capital, $50 per position and $250 maximum gross exposure; realized risks can differ"}
 
 
-def baselines(frames, start, end):
+def baselines(frames, start, end, cost_guard=False):
     from engine.research_lab import Candidate, simulate
     masks={symbol:((f.ema9>f.ema21)&(f.ema9.shift()<=f.ema21.shift())).fillna(False).to_numpy()
            for symbol,f in frames.items()}
-    ema=simulate(frames,Candidate("ema_pullback"),start,end,entry_masks=masks,include_diagnostics=False)
+    ema=simulate(frames,Candidate("ema_pullback"),start,end,entry_masks=masks,include_diagnostics=False,cost_guard=cost_guard)
     values=[]
     for symbol,f in sorted(frames.items()):
         subset=f.loc[(f.index>=start)&(f.index<end)]

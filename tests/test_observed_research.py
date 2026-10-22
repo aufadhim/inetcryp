@@ -36,6 +36,12 @@ class ObservedTests(unittest.TestCase):
         self.assertEqual(s["trades"][0]["exit_price"],80)
         self.assertLess(s["trades"][0]["pnl_usd"],-10)
 
+    def test_cost_budget_blocks_expensive_small_target(self):
+        s=account()
+        events=observed_step(s,Candidate("channel_breakout",target_pct=1),self.observation(bid=99.85),now="2025-01-01T00:15:20Z")
+        self.assertFalse(s["positions"])
+        self.assertEqual(events[0]["reason"],"insufficient_target_cost_budget")
+
     def test_insufficient_depth_cannot_fabricate_fill(self):
         self.assertIsNone(depth_fill([[100,.01]],quote=50))
         fill=depth_fill([[100,.1],[101,1]],quote=50)

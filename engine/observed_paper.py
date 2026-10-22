@@ -2,6 +2,7 @@
 import math
 from datetime import datetime, timezone
 import pandas as pd
+from engine.execution_costs import target_cost_budget
 from engine.research_lab import account
 
 MODEL="observed_depth_v1"
@@ -98,9 +99,16 @@ def observed_step(state,candidate,observations,now=None,fee=.001,allow_entry=Tru
         mark=depth_fill(book["bids"],quantity=fill["quantity"])
         if mark is None:
             events.append({"symbol":symbol,"status":"rejected","reason":"insufficient_exit_depth"});continue
+        budget=target_cost_budget(candidate.target_pct,mark["notional"]*(1-fee))
+        roundtrip_cost_pct=budget["roundtrip_cost_pct"]
+        # Target distance is only a cost budget, never a promise of expected return.
+        if not budget["allowed"]:
+            events.append({"symbol":symbol,"status":"rejected","reason":"insufficient_target_cost_budget",
+                           "roundtrip_cost_pct":roundtrip_cost_pct,"target_pct":candidate.target_pct});continue
         state["cash"]-=50
         state["positions"][symbol]={"entry":fill["price"],"quantity":fill["quantity"],"size":50,"entry_time":at,
-            "reference_entry":reference,"entry_regime":observation.get("regime","unknown"),"entry_hour_utc":now.hour,
+            "reference_entry":reference,"roundtrip_cost_pct":roundtrip_cost_pct,
+            "entry_regime":observation.get("regime","unknown"),"entry_hour_utc":now.hour,
             "entry_volatility":observation.get("volatility","unknown"),"execution_model":MODEL,
             "signal_candle":candle,"quote_received_at":book["received_at"],"latency_ms":book["latency_ms"]}
         marks[symbol]=mark["notional"]*(1-fee)

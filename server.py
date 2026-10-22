@@ -37,6 +37,18 @@ def universe_status():
     return latest_snapshot()
 
 
+@app.get("/api/radar/anomalies")
+def anomaly_radar_status():
+    import json
+    from pathlib import Path
+    path=Path("data/lab/anomaly-radar.json")
+    if not path.exists():return {"status":"not_started","items":[],"calls":[]}
+    result=json.loads(path.read_text(encoding="utf-8"))
+    result["age_seconds"]=max(0,(datetime.now(timezone.utc)-datetime.fromisoformat(result["as_of"])).total_seconds())
+    result["stale"]=result["age_seconds"]>900
+    return result
+
+
 @app.get("/api/research/status")
 def research_status():
     import json
@@ -65,6 +77,19 @@ def research_status():
         latest_research=Path("data/lab/research-latest.json")
         if latest_research.exists():
             result["research"]=json.loads(latest_research.read_text(encoding="utf-8"))
+        daily_path=Path("data/lab/daily-research.json")
+        if daily_path.exists():result["daily_research"]=json.loads(daily_path.read_text(encoding="utf-8"))
+        review_path=Path("data/lab/daily-review.json")
+        if review_path.exists():result["daily_review"]=json.loads(review_path.read_text(encoding="utf-8"))
+        exit_path=Path("data/lab/exit-research.json")
+        if exit_path.exists():result["exit_research"]=json.loads(exit_path.read_text(encoding="utf-8"))
+        online_path=Path("data/lab/online-learning.json")
+        if online_path.exists():result["online_learning"]=json.loads(online_path.read_text(encoding="utf-8"))
+        for name,filename in (("opportunity_radar","opportunity-radar.json"),("online_radar_learning","online-radar-learning.json")):
+            snapshot_path=Path("data/lab")/filename
+            if snapshot_path.exists():result[name]=json.loads(snapshot_path.read_text(encoding="utf-8"))
+        commission_path=Path("data/lab/commission-audit.json")
+        if commission_path.exists():result["commission_audit"]=json.loads(commission_path.read_text(encoding="utf-8"))
         legacy_diagnosis=Path("data/lab/legacy-loss-diagnosis.json")
         if legacy_diagnosis.exists():result["legacy_diagnosis"]=json.loads(legacy_diagnosis.read_text(encoding="utf-8"))
         diagnosis_path=Path("data/lab/loss-diagnosis.json")
@@ -100,7 +125,7 @@ async def protect_api(request: Request, call_next):
                 return JSONResponse({"detail": "ACCESS_PASSWORD belum dikonfigurasi."}, status_code=503)
         else:
             supplied = request.headers.get("X-Access-Password", "")
-            if not secrets.compare_digest(supplied, ACCESS_PASSWORD):
+            if not secrets.compare_digest(supplied.encode('utf-8'), ACCESS_PASSWORD.encode('utf-8')):
                 return JSONResponse({"detail": "Unauthorized"}, status_code=401)
     return await call_next(request)
 
@@ -134,6 +159,11 @@ async def serve_index():
     if os.path.exists(index_path):
         return FileResponse(index_path, headers={"Cache-Control": "no-store"})
     return JSONResponse({"status": "running", "message": "INETCRYP Terminal Backend Active"})
+
+
+@app.get("/api/auth/check")
+async def auth_check():
+    return JSONResponse({"authenticated": True}, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/tickers")

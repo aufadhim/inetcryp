@@ -12,3 +12,7 @@ history-test-*/
 intraday-test-*/
 *.zip
 *.log
+*.session
+*.session-*
+*.pem
+*.key

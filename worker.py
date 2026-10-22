@@ -17,11 +17,22 @@ from engine.intraday import STRATEGY
 from engine.dynamic_universe import DynamicUniverse, VERSION
 
 
+def refresh_commission_audit(client, symbols):
+    from pathlib import Path
+    commission_path=Path("data/lab/commission-audit.json")
+    old=json.loads(commission_path.read_text(encoding="utf-8")) if commission_path.exists() else {}
+    if not commission_path.exists() or old.get("mode")!="production_read_only" or time.time()-commission_path.stat().st_mtime>21600:
+        from engine.commission_audit import audit_commissions
+        from research_lab_worker import atomic
+        atomic(commission_path,audit_commissions(client,symbols))
+
+
 def main() -> None:
+    client = BinanceClient()
+    refresh_commission_audit(client,["BTCUSDT","ETHUSDT","SOLUSDT"])
     from engine.gemini_config import probe_access_once, probe_conversation
     probe_access_once()
     probe_conversation()
-    client = BinanceClient()
     trader = CryptoPaperTrader(client=client)
     universe = DynamicUniverse()
     trader.max_open_positions = 5
@@ -40,6 +51,8 @@ def main() -> None:
             except Exception:
                 selection = {"symbols": [], "as_of": None}
             trader.universe_as_of = selection["as_of"]
+            # Existing runtime credentials only; no order/test-order endpoint.
+            refresh_commission_audit(client,["BTCUSDT","ETHUSDT","SOLUSDT"]+selection["symbols"])
             result = trader.run_eval_cycle(symbols=selection["symbols"], timeframe=os.getenv("PAPER_TIMEFRAME", "15m"))
             # Reuse the normal application's adviser environment; research
             # worker itself only accesses public market data.

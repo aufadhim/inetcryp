@@ -132,7 +132,16 @@ class CryptoPaperTrader:
                 pos["highest_price"] = max(float(pos.get("highest_price", entry_price)), curr_price)
                 stop_price = float(pos.get("stop_price", entry_price * (1 - self.sl_pct / 100.0)))
                 if pnl_pct >= self.sl_plus_trigger_pct:
-                    stop_price = max(stop_price, entry_price * (1 + self.sl_plus_lock_pct / 100.0))
+                    from engine.execution_costs import break_even_exit
+                    # Lock NET profit; entry +0.1% alone can still lose after fees.
+                    if pos.get("quantity") and pos.get("accounting_version")=="net_costs_v1":
+                        lock_price=break_even_exit(pos["size_usd"],pos["quantity"],
+                            pos.get("fee_pct",self.fee_pct)/100,pos.get("slippage_pct",self.slippage_pct)/100,
+                            net_buffer_pct=self.sl_plus_lock_pct)
+                    else:
+                        lock_price=entry_price * (1 + self.sl_plus_lock_pct / 100.0)
+                    # Never place a newly raised stop above the current observed price.
+                    if curr_price>lock_price:stop_price = max(stop_price,lock_price)
                 if pnl_pct >= self.sl_plus_trigger_pct * 2:
                     stop_price = max(stop_price, pos["highest_price"] * (1 - self.sl_plus_trail_pct / 100.0))
                 pos["stop_price"] = stop_price

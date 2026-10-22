@@ -135,13 +135,14 @@ def account():
             "equity": 1000.0, "seen": {}, "first_at": None, "last_at": None,"observed_steps":0,"equity_curve":[],"realized_days":{}}
 
 
-def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allow_entry=True, spread=0.0005, track_curve=True):
+def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allow_entry=True, spread=0.0005, track_curve=True, cost_guard=False, exit_policy="fixed"):
     """Same execution for historical and forward paper: prior close signal, next open fill.
 
     Completed bars only; adverse opening gaps honored; stop wins ambiguous bars.
     Each position limited to $50 with at most 5 open positions; no leverage.
     """
     candidate.validate()
+    if exit_policy not in {"fixed","sl_plus","trailing"}:raise ValueError("Unknown exit policy")
     now = pd.Timestamp(stamp)
     if now.tzinfo is None:
         raise ValueError("Timezone required")
@@ -170,6 +171,10 @@ def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allo
         liquidity_ok=quote_volume is None or (math.isfinite(float(quote_volume)) and float(quote_volume)>0 and 50/float(quote_volume)<=0.001)
         impact=0 if quote_volume is None or not liquidity_ok else 0.1*50/float(quote_volume)
         side_slip=slip+spread/2+impact
+        if cost_guard:
+            from engine.execution_costs import target_cost_budget
+            liquidation=50/(1+fee)/(1+side_slip)*(1-side_slip)*(1-fee)
+            liquidity_ok=liquidity_ok and target_cost_budget(candidate.target_pct,liquidation)["allowed"]
         daily = state["realized_days"].get(day_key,0)
         if (not pos and entries.get(symbol) and allow_entry and daily > -10 and liquidity_ok
                 and len(state["positions"]) < 5 and state["cash"] >= 50):
@@ -185,6 +190,7 @@ def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allo
         if pos:
             pos["age"] += 1
             stop, target = pos["entry"]*(1-candidate.stop_pct/100), pos["entry"]*(1+candidate.target_pct/100)
+            stop=max(stop,pos.get("protective_stop",stop))
             op, low, high, close = (float(bar[k]) for k in ("Open", "Low", "High", "Close"))
             pos["max_favorable_pct"]=max(pos.get("max_favorable_pct",0),(high/pos["entry"]-1)*100)
             pos["max_adverse_pct"]=min(pos.get("max_adverse_pct",0),(low/pos["entry"]-1)*100)
@@ -209,6 +215,14 @@ def advance(state, candidate, bars, entries, stamp, fee=0.001, slip=0.0005, allo
                 del state["positions"][symbol]
             else:
                 pos["mark"] = close
+                # Only a completed close raises the stop for the NEXT candle.
+                # Never assume this candle's high occurred before its low.
+                if exit_policy!="fixed" and (close/pos["entry"]-1)*100>=.8:
+                    from engine.execution_costs import break_even_exit
+                    lock=break_even_exit(pos["size"],pos["quantity"],fee,
+                        max(side_slip,pos.get("execution_slip",slip)),net_buffer_pct=.1)
+                    if exit_policy=="trailing":lock=max(lock,close*(1-.006))
+                    if lock<close:pos["protective_stop"]=max(stop,lock)
     equity = state["cash"] + sum(p["quantity"]*p.get("mark",p["entry"])*(1-max(slip,p.get("execution_slip",slip)))*(1-fee) for p in state["positions"].values())
     state["equity"] = equity
     state["peak"] = max(state["peak"], equity)
@@ -236,7 +250,7 @@ def stats(state):
         "max_drawdown_pct": state["max_drawdown_pct"], "open_positions": len(state["positions"])}
 
 
-def simulate(frames, candidate, start, end, cost=1, delay_bars=0, entry_masks=None, include_diagnostics=True):
+def simulate(frames, candidate, start, end, cost=1, delay_bars=0, entry_masks=None, include_diagnostics=True, cost_guard=False):
     state = account()
     prepared = {s: (f, entry_masks[s] if entry_masks is not None else signals(f,candidate), {t:i for i,t in enumerate(f.index)},
                     f[["Open","High","Low","Close","Volume"]].to_numpy()) for s,f in frames.items()}
@@ -257,7 +271,7 @@ def simulate(frames, candidate, start, end, cost=1, delay_bars=0, entry_masks=No
             bars[s]["decision_volatility"]="high" if atr>=1.5 else "medium" if atr>=.5 else "low"
             bars[s]["entry_gap_pct"]=(values[i][0]/values[i-1][3]-1)*100
             entries[s]=bool(mask[max(0,i-1-delay_bars)])
-        advance(state,candidate,bars,entries,t,fee=0.001*cost,slip=0.0005*cost,spread=.0005*cost,track_curve=False)
+        advance(state,candidate,bars,entries,t,fee=0.001*cost,slip=0.0005*cost,spread=.0005*cost,track_curve=False,cost_guard=cost_guard)
     result=stats(state)
     if include_diagnostics:
         from engine.research_analysis import diagnose

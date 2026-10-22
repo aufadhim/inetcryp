@@ -64,6 +64,8 @@ class BinanceClient:
         # Host selection
         if signed and self.mode == "testnet":
             hosts = [BINANCE_TESTNET_HOST]
+        elif signed:
+            hosts = [host for host in BINANCE_PUBLIC_HOSTS if host != "https://data-api.binance.vision"]
         else:
             hosts = BINANCE_PUBLIC_HOSTS
 
@@ -273,6 +275,18 @@ class BinanceClient:
             pass
 
         return result
+
+    def get_account_commission(self, symbol: str, production_read_only: bool = False):
+        import re
+        if not re.fullmatch(r"[A-Z0-9]{3,20}",symbol):
+            raise ValueError("Invalid commission symbol")
+        client=self
+        if production_read_only and self.mode=="testnet":
+            # Local copy for this GET only; never mutate the trading client's mode.
+            import copy
+            client=copy.copy(self)
+            client.mode="live"
+        return client._request("GET", "/api/v3/account/commission", {"symbol":symbol,"recvWindow":5000}, signed=True)
 
     def get_account_balances(self) -> Dict[str, Any]:
         """Fetch account balance if API credentials are valid."""

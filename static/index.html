@@ -41,6 +41,7 @@
     ::-webkit-scrollbar-track { background: #0b0f19; }
     ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
   </style>
+  <link rel="stylesheet" href="/static/css/workspace.css?v=2">
 </head>
 <body class="min-h-screen flex flex-col">
 
@@ -53,9 +54,9 @@
         </div>
         <div>
           <h1 class="text-lg font-bold tracking-wide text-white flex items-center gap-2">
-            INETCRYP <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono">24/7 WHALE RADAR</span>
+            INETCRYP <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono">RESEARCH WORKSPACE</span>
           </h1>
-          <p class="text-xs text-gray-400">Crypto Bandarmologi, Volume Delta & Smart Money Terminal</p>
+          <p class="text-xs text-gray-400">Market intelligence · Paper trading · Research</p>
         </div>
       </div>
 
@@ -93,7 +94,7 @@
         <!-- Binance Status -->
         <span id="accountStatusBadge" class="hidden sm:inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-800/80">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-          Binance 24/7 Live
+          Paper mode · No live orders
         </span>
       </div>
     </div>
@@ -101,27 +102,36 @@
 
   <!-- Navigation Tabs -->
   <nav class="border-b border-gray-800 bg-[#0f172a] px-4">
+    <div class="workspace-brand"><span class="brand-mark">i<span>↗</span></span><strong>inetcryp<span>INTELLIGENCE WORKSPACE</span></strong></div>
+    <p class="nav-caption">WORKSPACE</p>
     <div class="max-w-7xl mx-auto flex space-x-6 text-sm font-medium">
+      <button onclick="switchTab('overview')" id="tabBtn-overview"><i class="fa-solid fa-border-all"></i> Ringkasan</button>
+      <button onclick="switchTab('radar')" id="tabBtn-radar"><i class="fa-solid fa-satellite-dish"></i> Radar peluang</button>
       <button onclick="switchTab('terminal')" id="tabBtn-terminal" class="py-3 border-b-2 border-cyan-500 text-cyan-400 flex items-center gap-2">
-        <i class="fa-solid fa-chart-line"></i> Terminal Radar
+        <i class="fa-solid fa-chart-line"></i> Terminal pasar
       </button>
       <button onclick="switchTab('screener')" id="tabBtn-screener" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2">
-        <i class="fa-solid fa-radar"></i> Screener Paus 24/7
+        <i class="fa-solid fa-filter"></i> Screener
       </button>
       <button onclick="switchTab('backtester')" id="tabBtn-backtester" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2">
-        <i class="fa-solid fa-vial"></i> Simulator Backtest
+        <i class="fa-solid fa-vial"></i> Backtest
       </button>
       <button onclick="switchTab('paper')" id="tabBtn-paper" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2">
-        <i class="fa-solid fa-robot"></i> Forward Tester (Paper Trade 24/7)
+        <i class="fa-solid fa-wallet"></i> Portofolio paper
       </button>
+      <button onclick="switchTab('research')" id="tabBtn-research"><i class="fa-solid fa-flask"></i> Research lab</button>
       <button onclick="switchTab('settings')" id="tabBtn-settings" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2">
         <i class="fa-solid fa-gear"></i> Bot & Telegram
       </button>
     </div>
+    <div class="nav-foot"><span class="status-dot"></span> PAPER & OBSERVATION<p>Eksperimen terkontrol.<br>Tidak ada order uang asli.</p></div>
   </nav>
 
   <!-- Main Content Area -->
   <main class="flex-1 max-w-7xl w-full mx-auto p-4 space-y-4">
+    <section id="tab-overview" class="hidden"><div id="overview-content"></div></section>
+    <section id="tab-radar" class="hidden"><div class="page-heading"><div><p class="eyebrow">DISCOVERY</p><h2>Radar peluang</h2><p>Anomali pasar dan observasi lintas koin. Bukan instruksi beli.</p></div><span class="mode-pill">OBSERVE ONLY</span></div><div id="radar-mount"></div></section>
+    <section id="tab-research" class="hidden"><div class="page-heading"><div><p class="eyebrow">EXPERIMENTS</p><h2>Research lab</h2><p>Pisahkan hasil eksplorasi, bukti validasi, dan model yang masih belajar.</p></div><span class="mode-pill">NO AUTO-PROMOTION</span></div><div id="research-mount"></div></section>
 
     <!-- ==================== TAB 1: TERMINAL RADAR ==================== -->
     <div id="tab-terminal" class="space-y-4">
@@ -131,14 +141,14 @@
         <!-- Card 1: Harga & 24h Change -->
         <div class="glass-card p-3 rounded-xl">
           <div class="text-xs text-gray-400">Harga Terakhir</div>
-          <div id="statPrice" class="text-lg font-bold text-white mt-1">$0.00</div>
-          <div id="statChange" class="text-xs font-semibold text-emerald-400">+0.00%</div>
+          <div id="statPrice" class="text-lg font-bold text-white mt-1">—</div>
+          <div id="statChange" class="text-xs font-semibold text-gray-400">Menunggu harga</div>
         </div>
 
         <!-- Card 2: 4-Phase Wyckoff -->
         <div class="glass-card p-3 rounded-xl">
           <div class="text-xs text-gray-400">Fase Wyckoff</div>
-          <div id="statPhase" class="text-base font-bold text-yellow-400 mt-1">AKUMULASI</div>
+          <div id="statPhase" class="text-base font-bold text-gray-400 mt-1">Menunggu data</div>
           <div id="statSignal" class="text-[11px] text-gray-400 truncate">Mendeteksi...</div>
         </div>
 
@@ -148,14 +158,14 @@
             <span>LPM Score</span>
             <span class="text-[10px] text-gray-500">Power Index</span>
           </div>
-          <div id="statLpm" class="text-lg font-bold text-cyan-400 mt-1">50.0 <span class="text-xs text-gray-400">/ 100</span></div>
+          <div id="statLpm" class="text-lg font-bold text-cyan-400 mt-1">— <span class="text-xs text-gray-400">/ 100</span></div>
           <div id="statSlipstream" class="text-xs text-gray-400">Slipstream: Netral</div>
         </div>
 
         <!-- Card 4: Modal Paus (Bandar Cost) -->
         <div class="glass-card p-3 rounded-xl">
           <div class="text-xs text-gray-400">Modal Paus (VWAP)</div>
-          <div id="statBandarCost" class="text-base font-bold text-purple-400 mt-1">$0.00</div>
+          <div id="statBandarCost" class="text-base font-bold text-purple-400 mt-1">—</div>
           <div id="statDistBandar" class="text-xs font-semibold text-gray-300">0.00% (Fair)</div>
         </div>
 
@@ -518,64 +528,8 @@
     INETCRYP — BandarMetrics 24/7 Terminal &bull; Powered by Binance Public & Futures Stream
   </footer>
 
+  <script src="/static/js/api-auth.js?v=2"></script>
   <script>
-    // API password stays in this browser session only. All parallel requests
-    // share one prompt so dashboard startup cannot create a prompt storm.
-    const nativeFetch = window.fetch.bind(window);
-    let authPromptPromise = null;
-    let authMessageTimer = null;
-
-    function showAuthMessage(message, ok = false) {
-      let box = document.getElementById("inetcrypAuthMessage");
-      if (!box) {
-        box = document.createElement("div");
-        box.id = "inetcrypAuthMessage";
-        box.className = "fixed top-4 right-4 z-[9999] max-w-sm rounded-xl border px-4 py-3 text-sm font-semibold shadow-2xl";
-        document.body.appendChild(box);
-      }
-      box.className = `fixed top-4 right-4 z-[9999] max-w-sm rounded-xl border px-4 py-3 text-sm font-semibold shadow-2xl ${ok ? "bg-emerald-950 border-emerald-700 text-emerald-200" : "bg-rose-950 border-rose-700 text-rose-200"}`;
-      box.textContent = message;
-      box.hidden = false;
-      clearTimeout(authMessageTimer);
-      authMessageTimer = setTimeout(() => { box.hidden = true; }, 5000);
-    }
-
-    function requestAccessPassword() {
-      if (!authPromptPromise) {
-        authPromptPromise = Promise.resolve().then(() => {
-          const value = window.prompt("Masukkan ACCESS_PASSWORD INETCRYP:") || "";
-          if (value) sessionStorage.setItem("inetcryp_access_password", value);
-          return value;
-        }).finally(() => {
-          authPromptPromise = null;
-        });
-      }
-      return authPromptPromise;
-    }
-
-    window.fetch = async (input, init = {}) => {
-      const target = typeof input === "string" ? input : (input && input.url) || "";
-      if (!target.startsWith("/api/")) return nativeFetch(input, init);
-      const headers = new Headers(init.headers || {});
-      let password = sessionStorage.getItem("inetcryp_access_password") || "";
-      if (password) headers.set("X-Access-Password", password);
-      let response = await nativeFetch(input, { ...init, headers });
-      if (response.status !== 401) return response;
-
-      sessionStorage.removeItem("inetcryp_access_password");
-      password = await requestAccessPassword();
-      if (!password) return response;
-
-      headers.set("X-Access-Password", password);
-      response = await nativeFetch(input, { ...init, headers });
-      if (response.status === 401) {
-        sessionStorage.removeItem("inetcryp_access_password");
-        showAuthMessage("Password dashboard salah. Muat ulang halaman untuk mencoba lagi.");
-      } else {
-        showAuthMessage("Dashboard berhasil terautentikasi.", true);
-      }
-      return response;
-    };
 
     // Global State
     let currentSymbol = "BTCUSDT";
@@ -591,13 +545,12 @@
     // Initialize Charts on Load
     window.addEventListener("DOMContentLoaded", () => {
       initCharts();
-      loadChartData();
-      loadOrderbook();
-      loadWhalePrints();
       loadPaperTrading();
+      switchTab('overview');
 
       // Poll whale prints & depth every 10s
       setInterval(() => {
+        if(document.body.dataset.page !== 'terminal') return;
         loadOrderbook();
         loadWhalePrints();
       }, 10000);
@@ -605,26 +558,32 @@
 
     // Tab Switching
     function switchTab(tabName) {
-      const tabs = ['terminal', 'screener', 'backtester', 'paper', 'settings'];
+      const tabs = ['overview', 'radar', 'terminal', 'screener', 'backtester', 'paper', 'research', 'settings'];
       tabs.forEach(t => {
         const el = document.getElementById(`tab-${t}`);
         const btn = document.getElementById(`tabBtn-${t}`);
         if (el && btn) {
           if (t === tabName) {
             el.classList.remove('hidden');
+            btn.setAttribute('aria-current','page');
             btn.className = "py-3 border-b-2 border-cyan-500 text-cyan-400 flex items-center gap-2";
           } else {
             el.classList.add('hidden');
+            btn.removeAttribute('aria-current');
             btn.className = "py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2";
           }
         }
       });
+      document.body.dataset.page=tabName;
 
       if (tabName === 'screener') loadScreener();
       if (tabName === 'paper') loadPaperTrading();
       if (tabName === 'terminal' && candleChart) {
         candleChart.resize(document.getElementById('candleChartContainer').clientWidth, 380);
         lpmChart.resize(document.getElementById('lpmChartContainer').clientWidth, 140);
+        loadChartData();
+        loadOrderbook();
+        loadWhalePrints();
       }
     }
 
@@ -975,6 +934,7 @@
 
         const d = json.data;
         document.getElementById("ptEquity").innerText = `$${d.equity.toLocaleString()}`;
+        window.dispatchEvent(new CustomEvent('inetcryp:paper',{detail:d}));
         document.getElementById("ptReturnPct").innerText = `${d.net_return_pct >= 0 ? '+' : ''}${d.net_return_pct}% Total Return`;
         document.getElementById("ptCash").innerText = `$${d.cash_usdt.toLocaleString()}`;
         document.getElementById("ptOpenCount").innerText = `${d.open_positions_count} Koin`;
@@ -1065,6 +1025,8 @@
       }
     }
   </script>
-<script src="/static/js/research-lab.js"></script>
+<script src="/static/js/research-lab.js?v=workspace-2"></script>
+<script src="/static/js/anomaly-radar.js?v=workspace-2"></script>
+<script src="/static/js/workspace.js?v=2"></script>
 </body>
 </html>

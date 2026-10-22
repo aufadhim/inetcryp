@@ -55,9 +55,22 @@ def discovery(reg):
     """Archive DEX observations for future causal tests; never fake historical signals."""
     r = requests.get("https://api.dexscreener.com/token-profiles/latest/v1", timeout=15)
     r.raise_for_status()
-    profiles = r.json()
+    profiles = r.json()[:5]
+    # Follow old discoveries through their deadlines, not just today's latest profiles.
+    due_tokens=[];seen_tokens={(p.get("chainId"),p.get("tokenAddress")) for p in profiles}
+    now=datetime.now(timezone.utc)
+    for payload, in reg.db.execute("SELECT payload FROM records WHERE kind='radar_call'"):
+        call=json.loads(payload)
+        if call.get("market")!="dex":continue
+        age=(now-datetime.fromisoformat(call["detected_at"])).total_seconds()
+        if not any(h not in call["outcomes"] and seconds-300<=age<=seconds+600 for h,seconds in (("30m",1800),("2h",7200),("24h",86400))):continue
+        m=call["metadata"];identity=(m["chain"],m["token_address"])
+        if identity in seen_tokens:continue
+        seen_tokens.add(identity);due_tokens.append({"chainId":identity[0],"tokenAddress":identity[1]})
+        if len(due_tokens)>=4:break
+    profiles+=due_tokens
     output = []
-    for profile_index,profile in enumerate(profiles[:5]):
+    for profile_index,profile in enumerate(profiles):
         chain, address = profile.get("chainId"), profile.get("tokenAddress")
         if not chain or not address:
             continue
@@ -90,6 +103,154 @@ def archive_orderbooks(reg, symbols):
         snapshot=market.snapshot(symbol)
         reg.event("cross_exchange_observation", {"observed_at":datetime.now(timezone.utc).isoformat(),
             "snapshot":snapshot,"historical_use":"forward_archive_only"})
+
+
+def research_exits(reg,plan):
+    if plan.get("status")!="completed":return
+    key=plan["id"]+":paired_exits_v1"
+    if reg.get("exit_research",key):return
+    from engine.exit_research import paired_exits
+    report={"id":key,"status":"running","results":[],"paper_admission":False,
+            "selection":"First two frozen daily candidates, not selected by exit results"}
+    atomic(ROOT/"exit-research.json",report)
+    start,end=pd.Timestamp(plan["data_start"]),pd.Timestamp(plan["data_end"])
+    frames={}
+    for symbol in plan["universe"]:
+        try:
+            frame,_=historical(symbol,start,end,cache_dir="data/lab/cache")
+            frames[symbol]=features(frame)
+        except Exception as exc:reg.event("exit_dataset_failed",{"symbol":symbol,"error_type":type(exc).__name__})
+    report["dataset_symbols"]=sorted(frames)
+    if len(frames)<3:
+        report.update(status="insufficient_data")
+    else:
+        for parameters in plan["parameters"][:2]:
+            c=Candidate(**parameters).validate()
+            normal=paired_exits(frames,c,start,end)
+            stress=paired_exits(frames,c,start,end,cost=2,delay_bars=1)
+            report["results"].append({"candidate":asdict_candidate(c),"normal":normal,"stress":stress})
+            atomic(ROOT/"exit-research.json",report)
+        report.update(status="completed",completed_at=pd.Timestamp.now(tz="UTC").isoformat())
+    reg.put("exit_research",key,report)
+    atomic(ROOT/"exit-research.json",report)
+
+
+def evaluate_daily(reg, plan):
+    """Cost attribution and chronological stability; never converts exploration to admission."""
+    if plan.get("status")!="completed":return
+    key=plan["id"]+":cost_review_v3"
+    existing=reg.get("daily_review",key)
+    if existing:return existing
+    report={"id":key,"status":"running","source":plan["id"],"candidates":[],
+            "policy":"reused_development_diagnostic_not_independent_validation","paper_admission":False}
+    atomic(ROOT/"daily-review.json",report)
+    start,end=pd.Timestamp(plan["data_start"]),pd.Timestamp(plan["data_end"])
+    frames={}
+    for symbol in plan["universe"]:
+        try:
+            frame,_=historical(symbol,start,end,cache_dir="data/lab/cache")
+            frames[symbol]=features(frame)
+        except Exception as exc:reg.event("daily_review_dataset_failed",{"symbol":symbol,"error_type":type(exc).__name__})
+    if len(frames)<3:return
+    report["dataset_symbols"]=sorted(frames)
+    for row in plan["results"]:
+        c=Candidate(**row["candidate"]["parameters"])
+        # Same signal timing isolates cost effects; delayed execution is separate.
+        normal=simulate(frames,c,start,end,include_diagnostics=True,cost_guard=plan.get("cost_guard",False))
+        doubled=simulate(frames,c,start,end,cost=2,include_diagnostics=False,cost_guard=plan.get("cost_guard",False))
+        delayed=simulate(frames,c,start,end,cost=2,delay_bars=1,include_diagnostics=False,cost_guard=plan.get("cost_guard",False))
+        folds=[simulate(frames,c,start+(end-start)*i/3,start+(end-start)*(i+1)/3,
+                        include_diagnostics=False,cost_guard=plan.get("cost_guard",False)) for i in range(3)]
+        reasons=[]
+        if normal["net_pnl"]<=0:reasons.append("negative_after_normal_costs")
+        if doubled["net_pnl"]<=0:reasons.append("negative_after_double_costs")
+        if delayed["net_pnl"]<=0:reasons.append("negative_after_cost_and_latency")
+        if sum(f["net_pnl"]>0 for f in folds)<2:reasons.append("unstable_across_three_periods")
+        if normal["trades"]<30:reasons.append("insufficient_trade_sample")
+        if normal["profit_factor"]<1.3:reasons.append("profit_factor_below_1_3")
+        if max(normal["max_drawdown_pct"],doubled["max_drawdown_pct"],delayed["max_drawdown_pct"])>5:
+            reasons.append("drawdown_above_5_percent")
+        report["candidates"].append({"candidate":row["candidate"],"normal":normal,
+            "double_cost_same_timing":doubled,"cost_and_latency":delayed,
+            "folds":folds,"rejection_reasons":reasons,"worth_fresh_validation":not reasons})
+        atomic(ROOT/"daily-review.json",report)
+    report.update(status="completed",completed_at=pd.Timestamp.now(tz="UTC").isoformat(),
+                  worth_fresh_validation=sum(r["worth_fresh_validation"] for r in report["candidates"]))
+    reg.put("daily_review",key,report)
+    reg.event("daily_cost_review",{"id":key,"reviewed":len(report["candidates"]),
+                                   "worth_fresh_validation":report["worth_fresh_validation"]})
+    atomic(ROOT/"daily-review.json",report)
+    return report
+
+
+def daily_research(reg, symbols, now=None):
+    """Bounded exploratory queue; never read the final holdout or admit paper accounts."""
+    now=pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC")
+    day=now.tz_convert("Asia/Jakarta").date().isoformat()
+    key=VERSION+":daily:"+day
+    previous=reg.get("daily_research",key)
+    if previous and previous.get("status") in {"completed","insufficient_data"}:
+        return previous
+    active=reg.get("state","active_experiment")
+    frozen=reg.get("experiment",active) if active else None
+    if not frozen:return {"status":"waiting_for_frozen_experiment"}
+    # All exploratory candles precede the frozen experiment's validation boundary.
+    # Repeated exploration is development, not fresh independent validation.
+    cutoff=pd.Timestamp(frozen["start"])+pd.Timedelta(days=144)
+    cutoff=min(cutoff,now.floor("15min"),pd.Timestamp(frozen["holdout_start"]))
+    start=cutoff-pd.Timedelta(days=90)
+    if previous:
+        pool=[Candidate(**p).validate() for p in previous["parameters"]]
+        symbols=previous["universe"]
+    else:
+        pool=[]
+        for proposal in reg.get("state","proposals",[])[:2]:
+            try:pool.append(Candidate(**proposal).validate())
+            except (ValueError,TypeError):continue
+        # Deterministic daily rotations keep the search bounded and reproducible.
+        offset=pd.Timestamp(day).dayofyear
+        families=["ema_pullback","channel_breakout","rsi_reversion","vwap_reclaim","flow_breakout","compression"]
+        for i in range(8):
+            pool.append(Candidate(families[(offset+i)%6],stop_pct=[1.0,1.5,2.0][(offset+i)%3],
+                target_pct=[3.0,4.5,6.0][(offset//3+i)%3],hold_bars=[8,16,24][(offset//7+i)%3],volume_ratio=[1.2,1.5,1.8][i%3]).validate())
+        pool=list({c.id:c for c in pool}.values())[:6]
+    plan=previous or {"id":key,"status":"running","frozen_at":now.isoformat(),"universe":symbols[:8],
+        "parameters":[asdict_candidate(c)["parameters"] for c in pool],"results":[],
+        "data_start":start.isoformat(),"data_end":cutoff.isoformat(),"max_trials":6,"cost_guard":True,
+        "policy":"exploratory_development_only_no_holdout_no_paper_admission"}
+    start,cutoff=pd.Timestamp(plan["data_start"]),pd.Timestamp(plan["data_end"])
+    reg.put("daily_research",key,plan)
+    atomic(ROOT/"daily-research.json",plan)
+    frames={}
+    for symbol in plan["universe"]:
+        try:
+            frame,_=historical(symbol,start,cutoff,cache_dir="data/lab/cache")
+            frames[symbol]=features(frame)
+        except Exception as exc:reg.event("daily_dataset_failed",{"symbol":symbol,"error_type":type(exc).__name__})
+    if len(frames)<3:
+        plan.update(status="insufficient_data",completed_at=now.isoformat())
+    else:
+        done={r["candidate"]["id"] for r in plan["results"]}
+        for c in pool:
+            if c.id in done:continue
+            normal=simulate(frames,c,start,cutoff,include_diagnostics=False,cost_guard=plan.get("cost_guard",False))
+            stress=simulate(frames,c,start,cutoff,cost=2,delay_bars=1,include_diagnostics=False,cost_guard=plan.get("cost_guard",False))
+            plan["results"].append({"candidate":asdict_candidate(c),"development":normal,"cost_latency_stress":stress})
+            reg.put("daily_research",key,plan)
+            atomic(ROOT/"daily-research.json",plan)
+        ranked=sorted(plan["results"],key=lambda r:r["cost_latency_stress"]["net_pnl"],reverse=True)
+        promising=[r for r in ranked if r["cost_latency_stress"]["net_pnl"]>0
+            and r["cost_latency_stress"]["profit_factor"]>=1.3 and r["cost_latency_stress"]["trades"]>=30
+            and r["cost_latency_stress"]["max_drawdown_pct"]<=5]
+        plan.update(status="completed",completed_at=pd.Timestamp.now(tz="UTC").isoformat(),
+                    promising=len(promising),best=ranked[0] if ranked else None)
+        if promising:
+            reg.put("state","proposals",[r["candidate"]["parameters"] for r in promising[:2]])
+        # Queue for the NEXT frozen weekly experiment only; never change its winner.
+        reg.event("daily_research_completed",{"id":key,"trials":len(ranked),"promising":len(promising),"paper_admission":False})
+    reg.put("daily_research",key,plan)
+    atomic(ROOT/"daily-research.json",plan)
+    return plan
 
 
 def research(reg, symbols):
@@ -138,6 +299,10 @@ def research(reg, symbols):
         "universe":symbols,"warning":"Current universe survivorship bias; historical scores alone cannot promote champion"}
     plan.update(holdout_start=holdout_start.isoformat(),frozen_at=(previous or {}).get("frozen_at",now.isoformat()),
         execution_model="spread_5bps_plus_slippage_5bps_plus_volume_impact",holdout_policy="nonoverlap_after_candidate_freeze")
+    # Preserve frozen legacy execution. New experiments share paper's cost guard.
+    plan["cost_guard"]=previous.get("cost_guard",False) if previous else True
+    from functools import partial
+    run_sim=partial(simulate,cost_guard=plan["cost_guard"])
     if now<end:
         plan.update(status="awaiting_fresh_holdout",gate={"eligible":False,"reasons":["Frozen candidates wait for new, nonoverlapping holdout candles"]})
         reg.put("experiment",key,plan)
@@ -162,21 +327,21 @@ def research(reg, symbols):
     development = []
     for c in pool:
         cached = reg.get("development",key+":"+c.id)
-        result = cached or simulate(frames,c,start,split_a)
+        result = cached or run_sim(frames,c,start,split_a)
         reg.put("development",key+":"+c.id,result)
         development.append({"candidate":asdict_candidate(c),"result":result})
         atomic(ROOT/"progress.json", {"phase":"development","completed":len(development),"total":12,"experiment":key})
     selected = max(development,key=lambda r:r["result"]["net_pnl"])
     c = Candidate(**selected["candidate"]["parameters"])
-    validation = simulate(frames,c,split_a,split_b)
-    stress = simulate(frames,c,split_a,split_b,cost=2)
-    latency = simulate(frames,c,split_a,split_b,cost=2,delay_bars=1)
+    validation = run_sim(frames,c,split_a,split_b)
+    stress = run_sim(frames,c,split_a,split_b,cost=2)
+    latency = run_sim(frames,c,split_a,split_b,cost=2,delay_bars=1)
     from engine.research_analysis import baselines,benchmark_gate
-    benchmarks=baselines(frames,split_a,split_b)
+    benchmarks=baselines(frames,split_a,split_b,cost_guard=plan["cost_guard"])
     baseline_decision=benchmark_gate(validation,benchmarks)
     atomic(ROOT/"loss-diagnosis.json",{"experiment":key,"candidate":c.id,"validation":validation.get("diagnostics"),
         "baselines":benchmarks,"baseline_gate":baseline_decision})
-    folds = [simulate(frames,c,split_a+pd.Timedelta(days=12*i),split_a+pd.Timedelta(days=12*(i+1))) for i in range(3)]
+    folds = [run_sim(frames,c,split_a+pd.Timedelta(days=12*i),split_a+pd.Timedelta(days=12*(i+1))) for i in range(3)]
     if now<end:
         failed=[]
         failed.extend(baseline_decision["reasons"])
@@ -195,10 +360,10 @@ def research(reg, symbols):
         atomic(ROOT/"research-latest.json",plan)
         return
     # Only the development winner can consume final holdout.
-    holdout = simulate(frames,c,holdout_start,end)
-    holdout_baselines=baselines(frames,holdout_start,end)
+    holdout = run_sim(frames,c,holdout_start,end)
+    holdout_baselines=baselines(frames,holdout_start,end,cost_guard=plan["cost_guard"])
     holdout_baseline_gate=benchmark_gate(holdout,holdout_baselines)
-    cross = [simulate({s:f},c,holdout_start,end) for s,f in frames.items()]
+    cross = [run_sim({s:f},c,holdout_start,end) for s,f in frames.items()]
     gate = research_gate(validation,stress,holdout,folds,cross)
     gate["reasons"].extend(baseline_decision["reasons"]+holdout_baseline_gate["reasons"])
     gate["eligible"]=not gate["reasons"]
@@ -390,6 +555,12 @@ def main(once=False,role="monitor"):
             symbols = universe(reg)
             if role=="research":
                 research(reg,symbols)
+                daily_research(reg,symbols)
+                daily_path=ROOT/"daily-research.json"
+                if daily_path.exists():
+                    daily_plan=json.loads(daily_path.read_text(encoding="utf-8"))
+                    evaluate_daily(reg,daily_plan)
+                    research_exits(reg,daily_plan)
                 legacy_path=Path("data/paper_trading_journal.json")
                 if legacy_path.exists():
                     from engine.research_analysis import diagnose
@@ -399,9 +570,36 @@ def main(once=False,role="monitor"):
                 from engine.research_data import collect_sources
                 collect_sources(reg,symbols)
                 archive_orderbooks(reg,symbols)
-                discovery(reg)
+                try:
+                    discovery(reg)
+                except Exception as exc:
+                    reg.event("dex_discovery_unavailable",{"error_type":type(exc).__name__})
+                from engine.opportunity_radar import collect as collect_radar
+                dex_snapshot={}
+                dex_path=ROOT/"discovery.json"
+                if dex_path.exists():
+                    observed=json.loads(dex_path.read_text(encoding="utf-8"))
+                    if 0<=(datetime.now(timezone.utc)-datetime.fromisoformat(observed["as_of"])).total_seconds()<=900:
+                        dex_snapshot=observed
+                atomic(ROOT/"opportunity-radar.json",collect_radar(reg,public,dex_snapshot.get("pairs",[])))
+                try:
+                    from engine.anomaly_radar import collect as collect_anomalies
+                    atomic(ROOT/"anomaly-radar.json",collect_anomalies(reg,public))
+                except Exception as exc:
+                    reg.event("anomaly_radar_error",{"error_type":type(exc).__name__})
             else:
                 tournament = tournament_cycle(reg,symbols)
+                try:
+                    from engine.anomaly_paper import cycle as anomaly_paper_cycle
+                    atomic(ROOT/"anomaly-paper.json",anomaly_paper_cycle(reg,public))
+                except Exception as exc:
+                    reg.event("anomaly_paper_error",{"error_type":type(exc).__name__})
+                try:
+                    from engine.online_learning import cycle as online_cycle
+                    atomic(ROOT/"online-learning.json",online_cycle(public,ROOT))
+                    atomic(ROOT/"online-radar-learning.json",online_cycle(public,ROOT,radar=True))
+                except Exception as exc:
+                    reg.event("online_learning_error",{"error_type":type(exc).__name__})
                 atomic(ROOT/"status.json",{"status":"sleeping","at":datetime.now(timezone.utc).isoformat(),
                     "version":VERSION,"symbols":symbols,"tournament":tournament,
                     "sources":reg.get("state","source_health",{}),"adviser":reg.get("advice",datetime.now(timezone.utc).date().isoformat(),{}),
